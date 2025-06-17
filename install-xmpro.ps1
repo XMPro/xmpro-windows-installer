@@ -27,7 +27,7 @@ param (
     [int]$InstallPhase = 0,
     
     [Parameter(Mandatory=$false)]
-    [string]$UbuntuAppxUrl = "https://aka.ms/wslubuntu2004",
+    [string]$UbuntuAppxUrl = "https://aka.ms/wslubuntu2204",
     
     [Parameter(Mandatory=$false)]
     [string]$ScriptUrl = "",
@@ -36,7 +36,17 @@ param (
     [string]$SqlSaPassword = "YourStrongP@ssw0rd123",
     
     [Parameter(Mandatory=$false)]
-    [string]$DockerComposeVersion = "2.36.1"
+    [string]$DockerComposeVersion = "2.36.1",
+    
+    # Application deployment parameters
+    [Parameter(Mandatory=$false)]
+    [string]$BaseUrl = "",
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipApplicationDeployment,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$ApplicationScriptUrl = ""
 )
 
 # Try to get the script URL from environment variable or detect from command line
@@ -64,6 +74,39 @@ if (-not [string]::IsNullOrEmpty($env:UBUNTU_APPX_URL)) {
 if (-not [string]::IsNullOrEmpty($env:SQL_SA_PASSWORD)) {
     $SqlSaPassword = $env:SQL_SA_PASSWORD
     Write-Host "Using SQL SA password from environment variable"
+}
+
+# Auto-detect BaseUrl and ApplicationScriptUrl from ScriptUrl if not provided
+if ([string]::IsNullOrEmpty($BaseUrl) -and -not [string]::IsNullOrEmpty($ScriptUrl)) {
+    # Extract base URL from script URL including path (e.g., https://example.com/v2/install-xmpro.ps1 -> https://example.com/v2)
+    try {
+        $uri = [System.Uri]::new($ScriptUrl)
+        $BaseUrl = "$($uri.Scheme)://$($uri.Host)"
+        if ($uri.Port -ne -1 -and $uri.Port -ne 80 -and $uri.Port -ne 443) {
+            $BaseUrl += ":$($uri.Port)"
+        }
+        
+        # Include the path but remove the filename
+        $path = $uri.AbsolutePath
+        if ($path -and $path -ne "/") {
+            $directory = [System.IO.Path]::GetDirectoryName($path).Replace("\", "/")
+            if ($directory -and $directory -ne ".") {
+                $BaseUrl += $directory
+            }
+        }
+        
+        Write-Host "Auto-detected BaseUrl from ScriptUrl: $BaseUrl"
+    }
+    catch {
+        Write-Warning "Could not auto-detect BaseUrl from ScriptUrl: $_"
+    }
+}
+
+# Auto-detect ApplicationScriptUrl if not provided
+if ([string]::IsNullOrEmpty($ApplicationScriptUrl) -and -not [string]::IsNullOrEmpty($ScriptUrl)) {
+    # Replace install-xmpro.ps1 with install-xmpro-application.ps1 in the URL
+    $ApplicationScriptUrl = $ScriptUrl -replace "install-xmpro\.ps1$", "install-xmpro-application.ps1"
+    Write-Host "Auto-detected ApplicationScriptUrl: $ApplicationScriptUrl"
 }
 
 # Check if running as administrator
@@ -196,7 +239,7 @@ function Handle-Restart {
     $arguments = "-InstallPhase $NextPhase -ContinueAfterRestart"
     if ($Force) { $arguments += " -Force" }
     if ($DockerVersion -ne "latest") { $arguments += " -DockerVersion `"$DockerVersion`"" }
-    if ($UbuntuAppxUrl -ne "https://aka.ms/wslubuntu2004") { $arguments += " -UbuntuAppxUrl `"$UbuntuAppxUrl`"" }
+    if ($UbuntuAppxUrl -ne "https://aka.ms/wslubuntu2204") { $arguments += " -UbuntuAppxUrl `"$UbuntuAppxUrl`"" }
     if (-not [string]::IsNullOrEmpty($ScriptUrl)) { $arguments += " -ScriptUrl `"$ScriptUrl`"" }
     
     # Log the script path for debugging
@@ -780,17 +823,128 @@ if ($InstallPhase -eq 2) {
     if (-not $hasUbuntu -or -not $ubuntuRunning) {
         Write-Log "No Ubuntu distribution found. Installing Ubuntu..." -ForegroundColor Yellow
         
-        # Install Ubuntu using direct AppX package download
+        # Install Ubuntu using direct AppX package download with retry logic
+        $ubuntuAppxFile = "$env:TEMP\Ubuntu2004.appx"
+        $maxRetries = 3
+        $downloadSuccess = $false
+        
+        for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+            try {
+                Write-Log "Downloading Ubuntu AppX package from $UbuntuAppxUrl (Attempt $attempt of $maxRetries)..." -ForegroundColor Yellow
+                Write-Log "Ubuntu package is large (~400MB), this may take several minutes..." -ForegroundColor Yellow
+                
+                # Remove any existing partial download
+                if (Test-Path $ubuntuAppxFile) {
+                    Remove-Item -Path $ubuntuAppxFile -Force
+                }
+                
+                # Try BITS first, then curl.exe, then Invoke-WebRequest as final fallback
+                if ($attempt -eq 1) {
+                    Write-Log "Attempt ${attempt}: Using BITS transfer..." -ForegroundColor Cyan
+                    $bitsJob = Start-BitsTransfer -Source $UbuntuAppxUrl -Destination $ubuntuAppxFile -Asynchronous -DisplayName "Ubuntu Download"
+                } elseif ($attempt -eq 2) {
+                    Write-Log "Attempt ${attempt}: BITS failed, using curl.exe..." -ForegroundColor Yellow
+                    $curlResult = curl.exe -L -o $ubuntuAppxFile $UbuntuAppxUrl --progress-bar
+                    if ($LASTEXITCODE -eq 0 -and (Test-Path $ubuntuAppxFile)) {
+                        $downloadSuccess = $true
+                        Write-Log "Ubuntu download completed successfully using curl.exe." -ForegroundColor Green
+                        break
+                    } else {
+                        Write-Log "curl.exe failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+                    }
+                } else {
+                    Write-Log "Attempt ${attempt}: curl.exe failed, using Invoke-WebRequest fallback..." -ForegroundColor Yellow
+                    Invoke-WebRequest -Uri $UbuntuAppxUrl -OutFile $ubuntuAppxFile -UseBasicParsing
+                    $downloadSuccess = $true
+                    Write-Log "Ubuntu download completed successfully using Invoke-WebRequest." -ForegroundColor Green
+                    break
+                }
+                
+                # Monitor the download with timeout (10 minutes)
+                $timeout = 600 # 10 minutes in seconds
+                $timer = 0
+                
+                while ($bitsJob.JobState -eq "Transferring" -and $timer -lt $timeout) {
+                    Start-Sleep -Seconds 10
+                    $timer += 10
+                    $progress = [math]::Round(($bitsJob.BytesTransferred / $bitsJob.BytesTotal) * 100, 1)
+                    if ($bitsJob.BytesTotal -gt 0) {
+                        Write-Log "Download progress: $progress% ($([math]::Round($bitsJob.BytesTransferred / 1MB, 1))MB / $([math]::Round($bitsJob.BytesTotal / 1MB, 1))MB)" -ForegroundColor Cyan
+                    }
+                }
+                
+                if ($bitsJob.JobState -eq "Transferred") {
+                    Complete-BitsTransfer -BitsJob $bitsJob
+                    $downloadSuccess = $true
+                    Write-Log "Ubuntu download completed successfully." -ForegroundColor Green
+                    break
+                } elseif ($bitsJob.JobState -eq "Error") {
+                    $errorMsg = $bitsJob.ErrorDescription
+                    Remove-BitsTransfer -BitsJob $bitsJob
+                    Write-Log "Download failed with error: $errorMsg" -ForegroundColor Red
+                } else {
+                    # Check actual job state for debugging
+                    Write-Log "BITS job exited monitoring loop. Job State: $($bitsJob.JobState)" -ForegroundColor Yellow
+                    Write-Log "Timer value: $timer seconds (timeout: $timeout seconds)" -ForegroundColor Yellow
+                    if ($bitsJob.ErrorCondition) {
+                        Write-Log "BITS Error Condition: $($bitsJob.ErrorCondition)" -ForegroundColor Red
+                        Write-Log "BITS Error Context: $($bitsJob.ErrorContext)" -ForegroundColor Red
+                        Write-Log "BITS Error Context Description: $($bitsJob.ErrorContextDescription)" -ForegroundColor Red
+                    }
+                    Remove-BitsTransfer -BitsJob $bitsJob
+                    Write-Log "Download failed. Actual job state: $($bitsJob.JobState)" -ForegroundColor Red
+                }
+                
+                if ($attempt -lt $maxRetries) {
+                    Write-Log "Retrying download in 10 seconds..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 10
+                }
+            }
+            catch {
+                Write-Log "Download attempt $attempt failed: $($_.Exception.Message)" -ForegroundColor Red
+                if ($attempt -lt $maxRetries) {
+                    Write-Log "Retrying download in 30 seconds..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 10
+                }
+            }
+        }
+        
+        if (-not $downloadSuccess) {
+            Write-Error "CRITICAL ERROR: Failed to download Ubuntu after $maxRetries attempts. Cannot proceed with installation."
+            Write-Log "This is a critical failure. The installation cannot continue without Ubuntu." -ForegroundColor Red
+            Write-Log "Please check your internet connection and try again, or manually download Ubuntu from Microsoft Store." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+        
         try {
-            Write-Log "Downloading Ubuntu AppX package from $UbuntuAppxUrl..." -ForegroundColor Yellow
-            $ubuntuAppxFile = "$env:TEMP\Ubuntu2004.appx"
+            # Install required dependencies first
+            Write-Log "Installing required dependencies for Ubuntu 22.04..." -ForegroundColor Yellow
             
-            # Use Start-BitsTransfer for reliable downloading
-            Start-BitsTransfer -Source $UbuntuAppxUrl -Destination $ubuntuAppxFile
+            # Download and install Microsoft.VCLibs.140.00.UWPDesktop
+            $vcLibsUrl = "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx"
+            $vcLibsFile = "$env:TEMP\Microsoft.VCLibs.x64.14.00.Desktop.appx"
+            
+            try {
+                Write-Log "Downloading Microsoft.VCLibs.140.00.UWPDesktop..." -ForegroundColor Yellow
+                curl.exe -L -o $vcLibsFile $vcLibsUrl
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $vcLibsFile)) {
+                    Write-Log "Installing Microsoft.VCLibs.140.00.UWPDesktop..." -ForegroundColor Yellow
+                    Add-AppxPackage -Path $vcLibsFile -ForceApplicationShutdown
+                    Remove-Item -Path $vcLibsFile -Force -ErrorAction SilentlyContinue
+                    Write-Log "Microsoft.VCLibs.140.00.UWPDesktop installed successfully." -ForegroundColor Green
+                } else {
+                    Write-Log "Warning: Could not download Microsoft.VCLibs.140.00.UWPDesktop dependency" -ForegroundColor Yellow
+                }
+            }
+            catch {
+                Write-Log "Warning: Could not install Microsoft.VCLibs.140.00.UWPDesktop dependency: $_" -ForegroundColor Yellow
+                Write-Log "Continuing with Ubuntu installation..." -ForegroundColor Yellow
+            }
             
             # Install the AppX package directly
             Write-Log "Installing Ubuntu AppX package..." -ForegroundColor Yellow
-            Add-AppxPackage -Path $ubuntuAppxFile
+            Add-AppxPackage -Path $ubuntuAppxFile -ForceApplicationShutdown
             
             # Initialize Ubuntu with root user immediately after installation
             Write-Log "Installing Ubuntu with root user..." -ForegroundColor Yellow
@@ -802,20 +956,40 @@ if ($InstallPhase -eq 2) {
             $verifyOutputString = $verifyOutput | Out-String
             Write-Log "Verification - WSL list output: $verifyOutputString" -ForegroundColor Yellow
             
-            # More robust check for Ubuntu in the WSL list
-            if ($verifyOutputString -match "Ubuntu") {
+            # More robust check for Ubuntu in the WSL list (same logic as earlier detection)
+            $verifyLines = $verifyOutputString -split "`n" | ForEach-Object { 
+                # Remove null characters using regex, trim whitespace, and remove carriage returns
+                ($_ -replace "`0", "").Trim() -replace "`r", ""
+            }
+            $ubuntuFoundInVerification = $false
+            
+            # Check each line for Ubuntu
+            foreach ($line in $verifyLines) {
+                if ($line.Length -gt 0 -and ($line.ToLower().Contains("ubuntu"))) {
+                    $ubuntuFoundInVerification = $true
+                    Write-Log "Verification: Found Ubuntu distribution: '$line'" -ForegroundColor Green
+                    break
+                }
+            }
+            
+            if ($ubuntuFoundInVerification) {
                 Write-Log "Ubuntu installation successful!" -ForegroundColor Green
-                
                 
                 # Clean up
                 Remove-Item -Path $ubuntuAppxFile -Force -ErrorAction SilentlyContinue
             } else {
-                Write-Log "Ubuntu installation may not have completed. Please check manually." -ForegroundColor Yellow
+                Write-Error "CRITICAL ERROR: Ubuntu installation verification failed."
+                Write-Log "Ubuntu does not appear in WSL list after installation." -ForegroundColor Red
+                Write-Log "This is a critical failure. The installation cannot continue without Ubuntu." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
             }
         }
         catch {
-            Write-Error "An error occurred during Ubuntu installation: ${_}"
-            Write-Log "You may need to manually install Ubuntu from the Microsoft Store." -ForegroundColor Yellow
+            Write-Error "CRITICAL ERROR: Ubuntu installation failed: $($_.Exception.Message)"
+            Write-Log "This is a critical failure. The installation cannot continue without Ubuntu." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }
         
         # A restart is required after Ubuntu installation
@@ -1063,9 +1237,268 @@ service docker status
         }
     }
     
-    Write-Log "Installation completed successfully!" -ForegroundColor Green
+    Write-Log "Phase 3 completed successfully!" -ForegroundColor Green
     Write-Log "You can now run Docker with WSL2 for Linux containers." -ForegroundColor Green
     Write-Log "Docker is also installed inside the WSL2 Ubuntu instance." -ForegroundColor Green
+    
+    # Restart before Phase 4 to ensure services are properly initialized
+    Handle-Restart -NextPhase 4 -Message "Phase 3 complete. A restart is required to ensure all services are properly initialized before Phase 4 (Application Deployment)."
+}
+
+# Phase 4: Service Verification and Application Deployment
+if ($global:CurrentPhase -eq 4 -or (-not $global:CurrentPhase -and -not $SkipApplicationDeployment)) {
+    Write-Log "Phase 4: Service Verification and Application Deployment" -ForegroundColor Cyan
+    
+    # Re-verify all services are working properly after potential restart
+    Write-Log "Re-verifying system services before application deployment..." -ForegroundColor Cyan
+    
+    # Optimize WSL networking before restart
+    Write-Log "Optimizing WSL networking interfaces..." -ForegroundColor Cyan
+    try {
+        # Get IPv4 addresses for vEthernet interfaces, sorted by IP
+        $vEthernetIPs = Get-NetIPAddress | Where-Object {
+            $_.AddressFamily -match "IPv4" -and 
+            $_.InterfaceAlias -match "vEthernet \((nat|WSL)\)"
+        } | Select-Object IPAddress, InterfaceAlias | Sort-Object IPAddress
+        
+        if ($vEthernetIPs -and $vEthernetIPs.Count -gt 1) {
+            $firstInterface = $vEthernetIPs[0]
+            Write-Log "First vEthernet interface: $($firstInterface.InterfaceAlias) ($($firstInterface.IPAddress))" -ForegroundColor Yellow
+            
+            # If vEthernet (nat) comes first, disable it to prioritize WSL
+            if ($firstInterface.InterfaceAlias -match "vEthernet \(nat\)") {
+                Write-Log "Disabling vEthernet (nat) interface to prioritize WSL networking..." -ForegroundColor Yellow
+                try {
+                    Disable-NetAdapter -Name "vEthernet (nat)" -Confirm:$false
+                    Write-Log "Successfully disabled vEthernet (nat) interface" -ForegroundColor Green
+                    Start-Sleep -Seconds 2
+                }
+                catch {
+                    Write-Log "Warning: Could not disable vEthernet (nat): $_" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Log "vEthernet (nat) is not first priority, no changes needed" -ForegroundColor Green
+            }
+        } else {
+            Write-Log "No multiple vEthernet interfaces found" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Log "Warning: Could not optimize WSL networking: $_" -ForegroundColor Yellow
+    }
+    
+    # Restart WSL to ensure clean state
+    Write-Log "Restarting WSL to ensure clean state..." -ForegroundColor Yellow
+    try {
+        wsl --shutdown
+        Start-Sleep -Seconds 5
+        wsl echo "WSL restarted successfully"
+        Write-Log "WSL restarted successfully" -ForegroundColor Green
+    }
+    catch {
+        Write-Log "Warning: Could not restart WSL: $_" -ForegroundColor Yellow
+    }
+    
+    # Verify Docker services
+    Write-Log "Verifying Docker services..." -ForegroundColor Cyan
+    try {
+        $dockerVersion = docker --version
+        Write-Log "Docker is accessible: $dockerVersion" -ForegroundColor Green
+    }
+    catch {
+        Write-Log "Warning: Docker may not be properly initialized: $_" -ForegroundColor Yellow
+        Write-Log "Attempting to start Docker..." -ForegroundColor Yellow
+        Start-Service Docker -ErrorAction SilentlyContinue
+    }
+    
+    # Verify SQL Server service
+    Write-Log "Verifying SQL Server service..." -ForegroundColor Cyan
+    $sqlService = Get-Service -Name "MSSQL*" -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "Running" }
+    if ($sqlService) {
+        Write-Log "SQL Server service is running: $($sqlService.Name)" -ForegroundColor Green
+    } else {
+        Write-Log "Warning: SQL Server service may not be running" -ForegroundColor Yellow
+    }
+    
+    Write-Log "Service verification complete. Proceeding to application deployment..." -ForegroundColor Green
+    
+    # Automatically proceed to application deployment if not skipped
+    if (-not $SkipApplicationDeployment) {
+        Write-Log "Starting application deployment..." -ForegroundColor Cyan
+        
+        # Function to download and execute application script
+        function Invoke-ApplicationDeployment {
+            param(
+                [string]$AppScriptUrl,
+                [string]$AppBaseUrl
+            )
+            
+            
+            $appScriptPath = "$global:PersistentDir\install-xmpro-application.ps1"
+            $useLocalScript = $false
+            
+            # Check for local script files (zipped bundle scenario)
+            $currentDir = ""
+            
+            try {
+                if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
+                    $currentDir = Split-Path -Parent $PSCommandPath
+                }
+                elseif ($PSScriptRoot -and (Test-Path $PSScriptRoot)) {
+                    $currentDir = $PSScriptRoot
+                }
+                else {
+                    $currentDir = Get-Location
+                }
+            }
+            catch {
+                Write-Log "ERROR: Could not detect script directory in Invoke-ApplicationDeployment: $_" -ForegroundColor Red
+                $currentDir = Get-Location
+            }
+            
+            # Ensure currentDir is not null
+            if (-not $currentDir -or $currentDir -eq "") {
+                $currentDir = "C:\temp"
+                Write-Log "WARNING: currentDir was null/empty, using fallback: '$currentDir'" -ForegroundColor Yellow
+            }
+            
+            $localAppScript = Join-Path $currentDir "install-xmpro-application.ps1"
+            
+            if (Test-Path $localAppScript) {
+                Write-Log "Found local install-xmpro-application.ps1, using local file" -ForegroundColor Green
+                $appScriptPath = $localAppScript
+                $useLocalScript = $true
+                
+                # Check for other bundle files and copy them to persistent directory if needed
+                $bundleFiles = @("docker-compose.yml", "ca.sh", "issue.sh")
+                foreach ($file in $bundleFiles) {
+                    $localFile = Join-Path $currentDir $file
+                    $targetFile = Join-Path $global:PersistentDir $file
+                    
+                    if (Test-Path $localFile) {
+                        Write-Log "Found local $file, copying to persistent directory" -ForegroundColor Green
+                        try {
+                            Copy-Item $localFile $targetFile -Force
+                        }
+                        catch {
+                            Write-Warning "Failed to copy $file : $_"
+                        }
+                    }
+                }
+            }
+            elseif (-not [string]::IsNullOrEmpty($AppScriptUrl)) {
+                Write-Log "Downloading install-xmpro-application.ps1 from: $AppScriptUrl" -ForegroundColor Yellow
+                try {
+                    Invoke-RestMethod -Uri $AppScriptUrl -OutFile $appScriptPath
+                    Write-Log "Successfully downloaded application script" -ForegroundColor Green
+                }
+                catch {
+                    Write-Error "Failed to download application script: $_"
+                    return $false
+                }
+            }
+            else {
+                Write-Warning "No ApplicationScriptUrl provided and no local script found. Skipping application deployment."
+                return $false
+            }
+            
+            # Execute the application script
+            if (Test-Path $appScriptPath) {
+                Write-Log "Executing application deployment script..." -ForegroundColor Cyan
+                try {
+                    $appParams = @{
+                        SkipEmailConfiguration = $false
+                        DebugMode = $true
+                    }
+                    
+                    if (-not [string]::IsNullOrEmpty($AppBaseUrl)) {
+                        $appParams.BaseUrl = $AppBaseUrl
+                    }
+                    
+                    & $appScriptPath @appParams
+                    Write-Log "Application deployment completed successfully!" -ForegroundColor Green
+                    return $true
+                }
+                catch {
+                    Write-Error "Application deployment failed: $_"
+                    return $false
+                }
+            }
+            else {
+                Write-Error "Application script not found at: $appScriptPath"
+                return $false
+            }
+        }
+        
+        # Call the application deployment
+        $deploymentSuccess = Invoke-ApplicationDeployment -AppScriptUrl $ApplicationScriptUrl -AppBaseUrl $BaseUrl
+        
+        if ($deploymentSuccess) {
+            Write-Log "Complete XMPro installation finished successfully!" -ForegroundColor Green
+            
+            # Check XMPro application container status
+            Write-Log "Checking XMPro application containers..." -ForegroundColor Cyan
+            try {
+                $xmproContainers = @("xmpro-sh-1", "xmpro-ad-1", "xmpro-ds-1")
+                foreach ($container in $xmproContainers) {
+                    $status = wsl docker ps -a --filter "name=$container" --format "{{.Names}}: {{.Status}}"
+                    if ($status) {
+                        Write-Log $status -ForegroundColor White
+                    } else {
+                        Write-Log "${container}: Not found" -ForegroundColor Yellow
+                    }
+                }
+            }
+            catch {
+                Write-Log "Could not check XMPro container status: $_" -ForegroundColor Yellow
+            }
+        }
+        else {
+            Write-Log "Machine preparation completed, but application deployment encountered issues." -ForegroundColor Yellow
+            Write-Log "You can manually run install-xmpro-application.ps1 to complete the setup." -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Log "Application deployment skipped. Run install-xmpro-application.ps1 manually to complete setup." -ForegroundColor Yellow
+    }
+    
+    # Mark Phase 4 as completed to prevent restart loop
+    Write-Log "Phase 4 completed successfully!" -ForegroundColor Green
+    
+    # Clean up scheduled task to prevent restart loop
+    Write-Log "Cleaning up scheduled tasks..." -ForegroundColor Cyan
+    Write-Log "Looking for task named: $global:BootstrapTask" -ForegroundColor Cyan
+    
+    # List all tasks that might be related to XMPro
+    try {
+        $allTasks = Get-ScheduledTask | Where-Object { $_.TaskName -like "*XMPRO*" -or $_.TaskName -like "*Bootstrap*" }
+        if ($allTasks) {
+            Write-Log "Found XMPro/Bootstrap related tasks:" -ForegroundColor Yellow
+            foreach ($task in $allTasks) {
+                Write-Log "  - $($task.TaskName) (State: $($task.State))" -ForegroundColor White
+            }
+        } else {
+            Write-Log "No XMPro/Bootstrap related tasks found" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Log "Could not enumerate scheduled tasks: $_" -ForegroundColor Yellow
+    }
+    
+    # Remove the specific ContainerBootstrap task (the actual task created)
+    try {
+        $specificTask = Get-ScheduledTask -TaskName "ContainerBootstrap" -ErrorAction SilentlyContinue
+        if ($specificTask) {
+            Write-Log "Removing scheduled task: ContainerBootstrap" -ForegroundColor Yellow
+            Unregister-ScheduledTask -TaskName "ContainerBootstrap" -Confirm:$false
+            Write-Log "Removed: ContainerBootstrap" -ForegroundColor Green
+        } else {
+            Write-Log "ContainerBootstrap task not found (may have been cleaned up already)" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Log "Error cleaning up ContainerBootstrap task: $_" -ForegroundColor Red
+    }
     
     # Prompt to press any key to continue
     Write-Log "Press any key to continue..." -ForegroundColor Yellow

@@ -1,85 +1,174 @@
 services:
+  ad:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ad:${REGISTRY_VERSION:-4.5.0-alpha}
+    depends_on:
+      addb:
+        condition: service_completed_successfully
+      addbmigrate:
+        condition: service_completed_successfully
+    ports:
+      - "${AD_PORT:-5202}:8443"
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=dev
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=${ASPNETCORE_Kestrel__Certificates__Default__Path:-/certs/ad.pfx}
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=${ASPNETCORE_Kestrel__Certificates__Default__Password:-}
+      - xm__serilog__minimumlevel__default=${AD_LOG_LEVEL:-Information}
+      - xm__xmpro__appDesigner__featureFlags__dbMigrationsEnabled=false
+      - xm__xmpro__appDesigner__featureFlags__enableHealthChecks=false
+      - xm__xmpro__appDesigner__featureFlags__enableLogging=true
+      - xm__xmpro__appDesigner__featureFlags__enableApplicationInsightsTelemetry=false
+      - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://sm.host/}
+      - xm__xmpro__xmidentity__client__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
+      - xm__xmpro__xmidentity__client__id=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
+      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-934489cd-28a1-da64-4eae-abb5ca40e659}
+      - xm__xmpro__dataStreamDesigner__server__baseUrl=${DS_BASEURL_SERVER:-https://ds:8443/}
+      - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
+      - xm__xmpro__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AD;User=${ADDB_USER:-someAdDbUser};Password=${ADDB_PASSWORD:-someAdDbPassword!}
+      - xm__xmpro__xmsettings__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AD;User=${ADDB_USER:-someAdDbUser};Password=${ADDB_PASSWORD:-someAdDbPassword!}
+      - xm__xmpro__healthChecks__cssPath=ClientApp/src/assets/content/styles/healthui.css
+    volumes:
+      - ${CERTIFICATES_DIR:-./certs}/certs:/certs
+      - ${CERTIFICATES_DIR:-./certs}/trustedcerts:/trustedcerts
+  addb:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/addb:${REGISTRY_VERSION:-4.5.0-alpha}
+    environment:
+      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
+      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
+      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
+      - SQLCMDUSER=${DB_SA_USER:-sa}
+      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
+    
+      - ADDB_USER=${ADDB_USER:-someAdDbUser}
+      - ADDB_PASSWORD=${ADDB_PASSWORD:-someAdDbPassword!}
+  smdb:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/smdb:${REGISTRY_VERSION:-4.5.0-alpha}
+    environment:
+      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
+      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
+      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
+      - SQLCMDUSER=${DB_SA_USER:-sa}
+      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
+    
+      - SMDB_USER=${SMDB_USER:-someSmDbUser}
+      - SMDB_PASSWORD=${SMDB_PASSWORD:-someSmDbPassword!}
   licenses:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/licenses:${REGISTRY_VERSION:-5.0.0-alpha}
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/licenses:${REGISTRY_VERSION:-4.5.0-alpha}
     depends_on:
       smdbmigrate:
         condition: service_completed_successfully
     environment:
-      - SQLCMDSERVER=${SQL_HOST}
-      - SQLCMDUSER=sa
-      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-Password1234!}
+      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
+      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
+      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
+      - SQLCMDUSER=${DB_SA_USER:-sa}
+      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
       - SQLCMDDBNAME=master
     
-      - SMDB_USERNAME=${SMDB_USERNAME:-someSmDbUser}
+      - SMDB_USER=${SMDB_USER:-someSmDbUser}
       - SMDB_PASSWORD=${SMDB_PASSWORD:-someSmDbPassword!}
       - COMPANY_ADMIN_EMAILADDRESS=${COMPANY_ADMIN_EMAILADDRESS:-evaluation@xmpro.com}
       - COMPANY_ID=${COMPANY_ID:-2}
       - LICENSE_API_URL=${LICENSE_API_URL:-https://fa-xmrlicense-nonprod.azurewebsites.net/api/license}
       - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - AD_PRODUCT_ID=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
-  ad:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/ad:${REGISTRY_VERSION:-5.0.0-alpha}
+  dsdbmigrate:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdbmigrate:${REGISTRY_VERSION:-4.5.0-alpha}
     depends_on:
-      addbmigrate:
+      dsdb:
         condition: service_completed_successfully
-      addb:
+    environment:
+      - DSDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
+      - DSDB_COLLECTION_ID=${DEFAULT_COLLECTION_ID:-b106c2a4-bea7-e718-f188-c079f3525882}
+      - DSDB_COLLECTION_SECRET=${DEFAULT_COLLECTION_SECRET:-00000007a25d5df3522dd72098eb557d}
+      - DSDB_COLLECTION_NAME=${DEFAULT_COLLECTION_NAME:-DEFAULT}
+  dsdb:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdb:${REGISTRY_VERSION:-4.5.0-alpha}
+    environment:
+      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
+      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
+      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
+      - SQLCMDUSER=${DB_SA_USER:-sa}
+      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
+    
+      - DSDB_USER=${DSDB_USER:-someDsDbUser}
+      - DSDB_PASSWORD=${DSDB_PASSWORD:-someDsDbPassword!}
+  ds:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ds:${REGISTRY_VERSION:-4.5.0-alpha}
+    depends_on:
+      dsdbmigrate:
+        condition: service_completed_successfully
+      dsdb:
         condition: service_completed_successfully
     ports:
-      - "${AD_PORT:-5202}:8443"
-    volumes:
-      - ${CERTIFICATES_DIR}/certs:/certs
-      - ${CERTIFICATES_DIR}/trustedcerts:/trustedcerts
+      - "${DS_PORT:-5203}:8443"
+    restart: unless-stopped
     environment:
-      - ASPNETCORE_Kestrel__Certificates__Default__Path=/certs/ad.pfx
-      - ASPNETCORE_Kestrel__Certificates__Default__Password=${CERT_PASSWORD:-XMPro@Cert2024!}
       - ASPNETCORE_ENVIRONMENT=dev
-      - xm__serilog__minimumlevel__default=${AD_LOG_LEVEL:-Information}
-      - xm__xmpro__appDesigner__featureFlags__dbMigrationsEnabled=false
-      - xm__xmpro__appDesigner__featureFlags__enableHealthChecks=false
-      - xm__xmpro__appDesigner__featureFlags__enableLogging=true
-      - xm__xmpro__appDesigner__featureFlags__enableApplicationInsightsTelemetry=false
-      - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://${SM_HOST:-${SQL_HOST}}/}
-      - xm__xmpro__xmidentity__client__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
-      - xm__xmpro__xmidentity__client__id=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
-      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-f27eeb2d-c557-281c-9d4c-fe44cfb74a97}
-      - xm__xmpro__data__connectionString=${ADDB_CONNECTIONSTRING:-Encrypt=false;Server=tcp:${SQL_HOST};Database=AD;User=sa;Password=${DB_SA_PASSWORD:-Password1234!}}
-      - xm__xmpro__xmsettings__data__connectionString=${ADDB_CONNECTIONSTRING:-Encrypt=false;Server=tcp:${SQL_HOST};Database=AD;User=sa;Password=${DB_SA_PASSWORD:-Password1234!}}
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=${ASPNETCORE_Kestrel__Certificates__Default__Path:-/certs/ds.pfx}
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=${ASPNETCORE_Kestrel__Certificates__Default__Password:-}
+      - xm__serilog__minimumlevel__default=${DS_LOG_LEVEL:-Information}
+      - xm__xmpro__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
+      - xm__xmpro__xmsettings__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
+      - xm__xmpro__dataStreamDesigner__streamHostDownloadBaseUrl=https://download.app.xmpro.com/
+      - xm__xmpro__dataStreamDesigner__featureFlags__dbMigrationsEnabled=false
+      - xm__xmpro__dataStreamDesigner__featureFlags__enableHealthChecks=false
+      - xm__xmpro__dataStreamDesigner__featureFlags__enableApplicationInsightsTelemetry=false
       - xm__xmpro__healthChecks__cssPath=ClientApp/src/assets/content/styles/healthui.css
-      - xm__xmpro__dataStreamDesigner__server__baseUrl=${DS_BASEURL_SERVER:-https://ds:8443/}
+      - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://sm.host/}
+      - xm__xmpro__xmidentity__client__id=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
+      - xm__xmpro__xmidentity__client__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
+      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-8fa48b5e-7b8a-6dbf-8b9a-461df668a5c7}
+      - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
+      - xm__xmpro__keyVault__provider=
+      - xm__xmpro__keyVault__name=
+    volumes:
+      - ${CERTIFICATES_DIR:-./certs}/certs:/certs
+      - ${CERTIFICATES_DIR:-./certs}/trustedcerts:/trustedcerts
   addbmigrate:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/addbmigrate:${REGISTRY_VERSION:-5.0.0-alpha}
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/addbmigrate:${REGISTRY_VERSION:-4.5.0-alpha}
     depends_on:
       addb:
         condition: service_completed_successfully
-    # extra_hosts:
-    #   - "${SQL_HOST}:${WINDOWS_IP:-172.17.0.1}"
     environment:
-      - ADDB_CONNECTIONSTRING=${ADDB_CONNECTIONSTRING:-Encrypt=false;Server=tcp:${SQL_HOST};Database=AD;User=sa;Password=${DB_SA_PASSWORD:-Password1234!}}
+      - ADDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AD;User=${ADDB_USER:-someAdDbUser};Password=${ADDB_PASSWORD:-someAdDbPassword!}
       - DS_BASEURL_CLIENT=${DS_BASEURL_CLIENT:-https://localhost:5203/}
-  addb:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/addb:${REGISTRY_VERSION:-5.0.0-alpha}
+  sh:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/stream-host:${REGISTRY_VERSION:-4.5.0-alpha}
+    depends_on:
+      dsdb:
+        condition: service_completed_successfully
+      ds:
+        condition: service_healthy
+    restart: unless-stopped
     environment:
-      - SQLCMDSERVER=${SQL_HOST}
-      - SQLCMDUSER=sa
-      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-Password1234!}
-    
-      - ADDB_USERNAME=${ADDB_USERNAME:-someAdDbUser}
-      - ADDB_PASSWORD=${ADDB_PASSWORD:-someAdDbPassword!}
+      - xm__consolelogging__minimumlevel__default=${SH_LOG_LEVEL:-Information}
+      - xm__xmpro__gateway__id=${SH_ID:-7cb606b3-c13f-b4ed-6942-1849bdc80164}
+      - xm__xmpro__gateway__name=${SH_NAME:-john-container}
+      - xm__xmpro__gateway__serverurl=${DS_BASEURL_SERVER:-https://ds:8443/}
+      - xm__xmpro__gateway__collectionid=${SH_COLLECTIONID:-$DEFAULT_COLLECTION_ID}
+      - xm__xmpro__gateway__secret=${SH_SECRET:-$DEFAULT_COLLECTION_SECRET}
+      - xm__xmpro__gateway__featureFlags__enableApplicationInsightsTelemetry=false
+      - xm__xmpro__gateway__featureflags__enablelegacycore=false
+      - xm__xmpro__gateway__featureflags__enablelegacycrypto=false
+      - xm__xmpro__XMCryptography__TripleDES__Key=
+    volumes:
+      - ${CERTIFICATES_DIR:-./certs}/certs:/certs
+      - ${CERTIFICATES_DIR:-./certs}/trustedcerts:/trustedcerts
   smdbmigrate:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/smdbmigrate:${REGISTRY_VERSION:-5.0.0-alpha}
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/smdbmigrate:${REGISTRY_VERSION:-4.5.0-alpha}
     depends_on:
       smdb:
         condition: service_completed_successfully
-    # extra_hosts:
-    #   - "${SQL_HOST}:${WINDOWS_IP:-172.17.0.1}"
     environment:
-      - SMDB_CONNECTIONSTRING=${SMDB_CONNECTIONSTRING:-Encrypt=false;Server=tcp:${SQL_HOST};Database=SM;User=sa;Password=${DB_SA_PASSWORD:-Password1234!}}
+      - SMDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=SM;User=${SMDB_USER:-someSmDbUser};Password=${SMDB_PASSWORD:-someSmDbPassword!}
       - COMPANY_NAME=${COMPANY_NAME:-EvaluationCompany}
       - COMPANY_ADMIN_FIRSTNAME=${COMPANY_ADMIN_FIRSTNAME:-SomeCompanyAdminFirstName}
       - COMPANY_ADMIN_SURNAME=${COMPANY_ADMIN_SURNAME:-SomeCompanyAdminSurname}
       - COMPANY_ADMIN_EMAILADDRESS=${COMPANY_ADMIN_EMAILADDRESS:-evaluation@xmpro.com}
       - COMPANY_ADMIN_USERNAME=${COMPANY_ADMIN_USERNAME:-admin@somecompany.example.com}
       - COMPANY_ADMIN_PASSWORD=${COMPANY_ADMIN_PASSWORD:-Password123!}
+      - SITE_ADMIN_PASSWORD=${SITE_ADMIN_PASSWORD:-Pass@word1}
       - AD_BASEURL_CLIENT=${AD_BASEURL_CLIENT:-https://localhost:5202/}
       - AI_BASEURL_CLIENT=$AI_BASEURL_CLIENT
       - DS_BASEURL_CLIENT=${DS_BASEURL_CLIENT:-https://localhost:5203/}
@@ -89,90 +178,8 @@ services:
       - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - SM_PRODUCT_ID=${SM_PRODUCT_ID:-380129dd-6ac3-47fc-a399-234394977680}
       - XMPRO_NOTEBOOK_PRODUCT_ID=${XMPRO_NOTEBOOK_PRODUCT_ID:-c6de3c46-e8ab-4c71-8787-947e6fd2292c}
-      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-f27eeb2d-c557-281c-9d4c-fe44cfb74a97}
-      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-87c38802-cafb-cfb1-c966-182f86e09b99}
-      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-f744911d-e8a6-f8fb-9665-61b185845d6a}
-      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-0c549103-d30a-c402-4b51-2df9e259043f}
+      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-934489cd-28a1-da64-4eae-abb5ca40e659}
+      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-d0a7b0d0-0199-d5ae-6626-936c9dea6b7d}
+      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-8fa48b5e-7b8a-6dbf-8b9a-461df668a5c7}
+      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-3fd1b241-80a5-59c0-97db-7d8e79ea8adc}
       - AI_PRODUCT_ENABLE=${AI_PRODUCT_ENABLE:-true}
-  sh:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/stream-host:${REGISTRY_VERSION:-5.0.0-alpha}
-    restart: unless-stopped
-    depends_on:
-      ds:
-        condition: service_healthy
-      dsdb:
-        condition: service_completed_successfully
-    env_file:
-      - ${CONFIG_DIR:-${CERTIFICATES_DIR}}/sh-config.env
-    volumes:
-      - ${CERTIFICATES_DIR}/certs:/certs
-      - ${CERTIFICATES_DIR}/trustedcerts:/trustedcerts
-    environment:
-      - ASPNETCORE_Kestrel__Certificates__Default__Path=/certs/sh.pfx
-      - ASPNETCORE_Kestrel__Certificates__Default__Password=${CERT_PASSWORD:-XMPro@Cert2024!}
-      - xm__consolelogging__minimumlevel__default=${SH_LOG_LEVEL:-Information}
-      - xm__xmpro__gateway__id=${SH_ID:-100d5683-9b02-de02-817d-4b663dda40f8}
-      - xm__xmpro__gateway__name=${SH_NAME:-jonahf-container}
-      - xm__xmpro__gateway__serverurl=${DS_BASEURL_SERVER:-https://ds:8443/}
-      - xm__xmpro__gateway__featureFlags__enableApplicationInsightsTelemetry=false
-      - xm__xmpro__gateway__featureflags__enablelegacycore=false
-      - xm__xmpro__gateway__featureflags__enablelegacycrypto=false
-      - xm__xmpro__XMCryptography__TripleDES__Key=
-  ds:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/ds:${REGISTRY_VERSION:-5.0.0-alpha}
-    depends_on:
-      dsdb:
-        condition: service_completed_successfully
-      dsdbmigrate:
-        condition: service_completed_successfully
-    ports:
-      - "${DS_PORT:-5203}:8443"
-    volumes:
-      - ${CERTIFICATES_DIR}/certs:/certs
-      - ${CERTIFICATES_DIR}/trustedcerts:/trustedcerts
-    environment:
-      - ASPNETCORE_Kestrel__Certificates__Default__Path=/certs/ds.pfx
-      - ASPNETCORE_Kestrel__Certificates__Default__Password=${CERT_PASSWORD:-XMPro@Cert2024!}
-      - ASPNETCORE_ENVIRONMENT=dev
-      - xm__serilog__minimumlevel__default=${DS_LOG_LEVEL:-Information}
-      - xm__xmpro__data__connectionString=${DSDB_CONNECTIONSTRING:-Encrypt=false;Server=tcp:${SQL_HOST};Database=DS;User=sa;Password=${DB_SA_PASSWORD:-Password1234!}}
-      - xm__xmpro__xmsettings__data__connectionString=${DSDB_CONNECTIONSTRING:-Encrypt=false;Server=tcp:${SQL_HOST};Database=DS;User=sa;Password=${DB_SA_PASSWORD:-Password1234!}}
-      - xm__xmpro__dataStreamDesigner__streamHostDownloadBaseUrl=https://download.app.xmpro.com/
-      - xm__xmpro__dataStreamDesigner__featureFlags__dbMigrationsEnabled=false
-      - xm__xmpro__dataStreamDesigner__featureFlags__enableHealthChecks=false
-      - xm__xmpro__dataStreamDesigner__featureFlags__enableApplicationInsightsTelemetry=false
-      - xm__xmpro__healthChecks__cssPath=ClientApp/src/assets/content/styles/healthui.css
-      - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://${SM_HOST:-${SQL_HOST}}/}
-      - xm__xmpro__xmidentity__client__id=${DS_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
-      - xm__xmpro__xmidentity__client__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
-      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-f744911d-e8a6-f8fb-9665-61b185845d6a}
-      - xm__xmpro__keyVault__provider=
-      - xm__xmpro__keyVault__name=
-      - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
-  dsdb:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/dsdb:${REGISTRY_VERSION:-5.0.0-alpha}
-    environment:
-      - SQLCMDSERVER=${SQL_HOST}
-      - SQLCMDUSER=sa
-      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-Password1234!}
-    
-      - DSDB_USERNAME=${DSDB_USERNAME:-someDsDbUser}
-      - DSDB_PASSWORD=${DSDB_PASSWORD:-someDsDbPassword!}
-  dsdbmigrate:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/dsdbmigrate:${REGISTRY_VERSION:-5.0.0-alpha}
-    depends_on:
-      dsdb:
-        condition: service_completed_successfully
-    # extra_hosts:
-    #   - "${SQL_HOST}:${WINDOWS_IP:-172.17.0.1}"
-    environment:
-      - DSDB_CONNECTIONSTRING=${DSDB_CONNECTIONSTRING:-Encrypt=false;Server=tcp:${SQL_HOST};Database=DS;User=sa;Password=${DB_SA_PASSWORD:-Password1234!}}
-  smdb:
-    image: ${REGISTRY_URL:-xmpro.azurecr.io}/smdb:${REGISTRY_VERSION:-5.0.0-alpha}
-    environment:
-      - SQLCMDSERVER=${SQL_HOST}
-      - SQLCMDUSER=sa
-      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-Password1234!}
-    
-      - SMDB_USERNAME=${SMDB_USERNAME:-someSmDbUser}
-      - SMDB_PASSWORD=${SMDB_PASSWORD:-someSmDbPassword!}
