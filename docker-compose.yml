@@ -38,7 +38,7 @@ services:
       - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
       - SQLCMDUSER=${DB_SA_USER:-sa}
       - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
-    
+
       - ADDB_USER=${ADDB_USER:-someAdDbUser}
       - ADDB_PASSWORD=${ADDB_PASSWORD:-someAdDbPassword!}
   smdb:
@@ -49,7 +49,7 @@ services:
       - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
       - SQLCMDUSER=${DB_SA_USER:-sa}
       - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
-    
+
       - SMDB_USER=${SMDB_USER:-someSmDbUser}
       - SMDB_PASSWORD=${SMDB_PASSWORD:-someSmDbPassword!}
   licenses:
@@ -64,7 +64,7 @@ services:
       - SQLCMDUSER=${DB_SA_USER:-sa}
       - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
       - SQLCMDDBNAME=master
-    
+
       - SMDB_USER=${SMDB_USER:-someSmDbUser}
       - SMDB_PASSWORD=${SMDB_PASSWORD:-someSmDbPassword!}
       - COMPANY_ADMIN_EMAILADDRESS=${COMPANY_ADMIN_EMAILADDRESS:-evaluation@xmpro.com}
@@ -90,7 +90,7 @@ services:
       - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
       - SQLCMDUSER=${DB_SA_USER:-sa}
       - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
-    
+
       - DSDB_USER=${DSDB_USER:-someDsDbUser}
       - DSDB_PASSWORD=${DSDB_PASSWORD:-someDsDbPassword!}
   ds:
@@ -162,7 +162,7 @@ services:
         condition: service_completed_successfully
     environment:
       - SMDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=SM;User=${SMDB_USER:-someSmDbUser};Password=${SMDB_PASSWORD:-someSmDbPassword!}
-      - COMPANY_NAME=${COMPANY_NAME:-EvaluationCompany}
+      - COMPANY_NAME=${COMPANY_NAME:-Evaluation}
       - COMPANY_ADMIN_FIRSTNAME=${COMPANY_ADMIN_FIRSTNAME:-SomeCompanyAdminFirstName}
       - COMPANY_ADMIN_SURNAME=${COMPANY_ADMIN_SURNAME:-SomeCompanyAdminSurname}
       - COMPANY_ADMIN_EMAILADDRESS=${COMPANY_ADMIN_EMAILADDRESS:-evaluation@xmpro.com}
