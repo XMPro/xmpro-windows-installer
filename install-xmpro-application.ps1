@@ -1535,7 +1535,7 @@ function Install-XMProSM {
         # Check if SSL certificate already exists
         $sslCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\ssl.pfx"
         if (Test-Path $sslCertPath) {
-            $sslCert = Get-ChildItem "Cert:\LocalMachine\My" | Where-Object { $_.Subject -like "*$($global:Hostname)*" } | Select-Object -First 1
+            $sslCert = Get-ChildItem "Cert:\LocalMachine\My" | Where-Object { $_.Subject -like "CN=$($global:Hostname)*" } | Select-Object -First 1
             if ($sslCert) {
                 Write-Log "SSL certificate found in certificate store, will skip import" -ForegroundColor Yellow
                 $installParams['NoSslCert'] = $true
@@ -1888,7 +1888,10 @@ function Configure-SigningCertificate {
 
         if ($certPathToUse) {
             # Import the certificate to Personal store
-            $cert = Import-PfxCertificate -FilePath $certPathToUse -CertStoreLocation "Cert:\LocalMachine\My" -Password (ConvertTo-SecureString -String $CertPassword -AsPlainText -Force) -ErrorAction SilentlyContinue
+            $importResult = Import-PfxCertificate -FilePath $certPathToUse -CertStoreLocation "Cert:\LocalMachine\My" -Password (ConvertTo-SecureString -String $CertPassword -AsPlainText -Force) -ErrorAction SilentlyContinue
+            
+            # Handle array return from Import-PfxCertificate
+            $cert = if ($importResult -is [System.Array]) { $importResult[0] } else { $importResult }
 
             if ($cert) {
                 Write-Log "SM certificate imported with thumbprint: $($cert.Thumbprint)" -ForegroundColor Green
@@ -1940,36 +1943,52 @@ function Configure-SigningCertificate {
                 # Grant IIS AppPool access to certificate private key
                 Write-Log "Granting IIS AppPool access to certificate private key..." -ForegroundColor Yellow
                 try {
-                    # Method 1: Grant permission to specific certificate private key
+                    # Method 1: Try Ron's secure approach first - specific key file permissions
                     if ($cert.HasPrivateKey) {
                         try {
-                            # Get the private key container name
-                            $privateKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-
-                            # Try to get the key file path for newer certificate formats
-                            $keyName = ""
-                            if ($privateKey -is [System.Security.Cryptography.RSACng]) {
-                                # CNG key - different path structure
-                                $machineKeysPath = "$env:ProgramData\Microsoft\Crypto\Keys"
-                                icacls $machineKeysPath /grant "IIS AppPool\${AppPoolName}:(R)" /T 2>$null | Out-Null
-                            } else {
-                                # Legacy CSP key
-                                $machineKeysPath = "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys"
-                                icacls $machineKeysPath /grant "IIS AppPool\${AppPoolName}:(R)" /T 2>$null | Out-Null
+                            Write-Log "Attempting secure method: specific key file permissions..." -ForegroundColor Yellow
+                            
+                            # Get the private key and find the specific key file (Ron's method)
+                            $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+                            $key = $rsa.Key
+                            $uniqueName = $key.UniqueName
+                            Write-Log "Key unique name: $uniqueName" -ForegroundColor Gray
+                            
+                            # Try to locate the specific private key file
+                            $keyPath = "C:\ProgramData\Microsoft\Crypto\Keys\$uniqueName"
+                            if (!(Test-Path $keyPath)) {
+                                $keyPath = "C:\ProgramData\Microsoft\Crypto\RSA\MachineKeys\$uniqueName"
                             }
-
-                            Write-Log "Granted private key access to IIS AppPool\${AppPoolName}" -ForegroundColor Green
-
+                            
+                            if (Test-Path $keyPath) {
+                                Write-Log "Found specific key file: $keyPath" -ForegroundColor Green
+                                
+                                # Apply Ron's secure ACL method
+                                $acl = Get-Acl $keyPath
+                                $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS APPPOOL\$AppPoolName", 'FullControl', 'allow')
+                                $acl.AddAccessRule($rule)
+                                $rule2 = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS_IUSRS", 'FullControl', 'allow')
+                                $acl.AddAccessRule($rule2)
+                                Set-Acl $keyPath $acl
+                                
+                                Write-Log "Applied secure permissions to specific key file" -ForegroundColor Green
+                            } else {
+                                throw "Can't locate private key file with unique name $uniqueName"
+                            }
+                            
                         } catch {
-                            # Fallback: Grant broader permissions to both key directories
+                            Write-Log "Secure method failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                            Write-Log "Falling back to broad permissions method..." -ForegroundColor Yellow
+                            
+                            # Fallback: Grant broader permissions to both key directories (icacls method)
                             $machineKeysPath = "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys"
                             $cngKeysPath = "$env:ProgramData\Microsoft\Crypto\Keys"
-
-                            icacls $machineKeysPath /grant "IIS AppPool\${AppPoolName}:(R)" /T 2>$null | Out-Null
-                            icacls $cngKeysPath /grant "IIS AppPool\${AppPoolName}:(R)" /T 2>$null | Out-Null
-                            icacls $machineKeysPath /grant "IIS_IUSRS:(R)" /T 2>$null | Out-Null
-                            icacls $cngKeysPath /grant "IIS_IUSRS:(R)" /T 2>$null | Out-Null
-
+                            
+                            icacls $machineKeysPath /grant "IIS AppPool\${AppPoolName}:(F)" /T 2>$null | Out-Null
+                            icacls $cngKeysPath /grant "IIS AppPool\${AppPoolName}:(F)" /T 2>$null | Out-Null
+                            icacls $machineKeysPath /grant "IIS_IUSRS:(F)" /T 2>$null | Out-Null
+                            icacls $cngKeysPath /grant "IIS_IUSRS:(F)" /T 2>$null | Out-Null
+                            
                             Write-Log "Applied fallback certificate permissions to both CSP and CNG key stores" -ForegroundColor Yellow
                         }
                     }

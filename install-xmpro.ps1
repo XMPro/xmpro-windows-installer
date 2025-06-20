@@ -1252,35 +1252,23 @@ if ($global:CurrentPhase -eq 4 -or (-not $global:CurrentPhase -and -not $SkipApp
     # Re-verify all services are working properly after potential restart
     Write-Log "Re-verifying system services before application deployment..." -ForegroundColor Cyan
     
-    # Optimize WSL networking before restart
+    # Optimize WSL networking before restart - Force disable vEthernet (nat) for migrate containers
     Write-Log "Optimizing WSL networking interfaces..." -ForegroundColor Cyan
     try {
-        # Get IPv4 addresses for vEthernet interfaces, sorted by IP
-        $vEthernetIPs = Get-NetIPAddress | Where-Object {
-            $_.AddressFamily -match "IPv4" -and 
-            $_.InterfaceAlias -match "vEthernet \((nat|WSL)\)"
-        } | Select-Object IPAddress, InterfaceAlias | Sort-Object IPAddress
-        
-        if ($vEthernetIPs -and $vEthernetIPs.Count -gt 1) {
-            $firstInterface = $vEthernetIPs[0]
-            Write-Log "First vEthernet interface: $($firstInterface.InterfaceAlias) ($($firstInterface.IPAddress))" -ForegroundColor Yellow
-            
-            # If vEthernet (nat) comes first, disable it to prioritize WSL
-            if ($firstInterface.InterfaceAlias -match "vEthernet \(nat\)") {
-                Write-Log "Disabling vEthernet (nat) interface to prioritize WSL networking..." -ForegroundColor Yellow
-                try {
-                    Disable-NetAdapter -Name "vEthernet (nat)" -Confirm:$false
-                    Write-Log "Successfully disabled vEthernet (nat) interface" -ForegroundColor Green
-                    Start-Sleep -Seconds 2
-                }
-                catch {
-                    Write-Log "Warning: Could not disable vEthernet (nat): $_" -ForegroundColor Yellow
-                }
-            } else {
-                Write-Log "vEthernet (nat) is not first priority, no changes needed" -ForegroundColor Green
+        # Check if vEthernet (nat) interface exists and disable it
+        $natInterface = Get-NetAdapter -Name "vEthernet (nat)" -ErrorAction SilentlyContinue
+        if ($natInterface) {
+            Write-Log "Found vEthernet (nat) interface - disabling to ensure migrate containers work properly..." -ForegroundColor Yellow
+            try {
+                Disable-NetAdapter -Name "vEthernet (nat)" -Confirm:$false
+                Write-Log "Successfully disabled vEthernet (nat) interface" -ForegroundColor Green
+                Start-Sleep -Seconds 2
+            }
+            catch {
+                Write-Log "Warning: Could not disable vEthernet (nat): $_" -ForegroundColor Yellow
             }
         } else {
-            Write-Log "No multiple vEthernet interfaces found" -ForegroundColor Yellow
+            Write-Log "vEthernet (nat) interface not found - no action needed" -ForegroundColor Green
         }
     }
     catch {
