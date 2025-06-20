@@ -81,6 +81,15 @@ param (
     [switch]$DebugMode
 )
 
+# Initialize persistent directory and log file path before Write-Log function
+$global:PersistentDir = "$env:USERPROFILE\.xmpro-post-install"
+$global:LogFile = "$global:PersistentDir\XMPro-Post-Install.log"
+
+# Create persistent directory immediately if it doesn't exist (needed for Write-Log)
+if (-not (Test-Path $global:PersistentDir)) {
+    New-Item -Path $global:PersistentDir -ItemType Directory -Force | Out-Null
+}
+
 # Function to write to log file
 function Write-Log {
     param (
@@ -124,8 +133,6 @@ function Get-SqlSaPassword {
 }
 
 # Global variables
-$global:PersistentDir = "$env:USERPROFILE\.xmpro-post-install"
-$global:LogFile = "$global:PersistentDir\XMPro-Post-Install.log"
 $global:EnvFile = "$global:PersistentDir\.env"
 $global:DockerComposeFile = "$DockerComposeDir\$DockerComposeFileName"
 $global:CertificatesDir = $CertificatesDir
@@ -135,6 +142,46 @@ $global:CertificatesDir = $CertificatesDir
 # Database user credentials - randomized passwords for security (using GUIDs for simplicity)
 $global:EnvCache = @{}
 
+# Function to get manifest configuration with fallback logic
+function Get-Manifest {
+    param(
+        [string]$BaseUrl
+    )
+    
+    # 1. Check for local manifest first (bundle scenario)
+    if (Test-Path ".\manifest.json") {
+        Write-Log "Using local manifest.json from bundle" -ForegroundColor Green
+        try {
+            $manifest = Get-Content ".\manifest.json" | ConvertFrom-Json
+            Write-Log "Loaded manifest - Registry: $($manifest.registryUrl), Version: $($manifest.registryVersion)" -ForegroundColor Green
+            return $manifest
+        }
+        catch {
+            Write-Log "Error parsing local manifest.json: $_" -ForegroundColor Yellow
+        }
+    }
+    
+    # 2. Try to download from BaseUrl (if available)
+    if (-not [string]::IsNullOrEmpty($BaseUrl)) {
+        $manifestUrl = "${BaseUrl}/manifest.json"
+        Write-Log "Attempting to download manifest from: $manifestUrl" -ForegroundColor Yellow
+        try {
+            $manifest = Invoke-RestMethod -Uri $manifestUrl -UseBasicParsing
+            Write-Log "Downloaded manifest - Registry: $($manifest.registryUrl), Version: $($manifest.registryVersion)" -ForegroundColor Green
+            return $manifest
+        } 
+        catch {
+            Write-Log "Could not download manifest from BaseUrl: $_" -ForegroundColor Yellow
+        }
+    }
+    
+    # 3. Fallback to defaults (current hardcoded values)
+    Write-Log "No manifest available, using default registry values" -ForegroundColor Yellow
+    return @{
+        registryUrl = "xmprononprod.azurecr.io"
+        registryVersion = "4.5.0-alpha"
+    }
+}
 
 function Load-EnvCache {
     if (Test-Path $global:EnvFile) {
@@ -183,6 +230,32 @@ $global:DsDbPassword = ""
 $global:DefaultCollectionId = ""
 $global:DefaultCollectionSecret = ""
 
+# Normalize BaseUrl - remove trailing slash for consistency
+if (-not [string]::IsNullOrEmpty($BaseUrl) -and $BaseUrl.EndsWith("/")) {
+    $BaseUrl = $BaseUrl.TrimEnd("/")
+    Write-Log "Normalized BaseUrl (removed trailing slash): $BaseUrl" -ForegroundColor Yellow
+}
+
+# Load manifest configuration and override registry parameters
+Write-Log "Loading manifest configuration..." -ForegroundColor Cyan
+$manifest = Get-Manifest -BaseUrl $BaseUrl
+
+# Override registry parameters from manifest if available
+if ($manifest.registryUrl) {
+    $RegistryUrl = $manifest.registryUrl
+    Write-Log "Registry URL set from manifest: $RegistryUrl" -ForegroundColor Green
+}
+if ($manifest.registryVersion) {
+    $RegistryVersion = $manifest.registryVersion  
+    Write-Log "Registry Version set from manifest: $RegistryVersion" -ForegroundColor Green
+}
+
+# Update SM.zip URL to use BaseUrl instead of hardcoded marketplace URL
+if (-not [string]::IsNullOrEmpty($BaseUrl)) {
+    $SmZipUrl = "${BaseUrl}/SM.zip"
+    Write-Log "SM.zip URL set from BaseUrl: $SmZipUrl" -ForegroundColor Green
+}
+
 Load-EnvCache
 Set-FromEnv ([ref]$global:SmDbUser) "SMDB_USER" $global:SmDbUser
 Set-FromEnv ([ref]$global:AdDbUser) "ADDB_USER" $global:AdDbUser
@@ -197,11 +270,6 @@ Set-FromEnv ([ref]$global:DefaultCollectionSecret) "DEFAULT_COLLECTION_SECRET" (
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Warning "This script requires administrative privileges. Please run as administrator."
     exit
-}
-
-# Create persistent directory if it doesn't exist
-if (-not (Test-Path $global:PersistentDir)) {
-    New-Item -Path $global:PersistentDir -ItemType Directory -Force | Out-Null
 }
 
 # Create Docker Compose directory if it doesn't exist
