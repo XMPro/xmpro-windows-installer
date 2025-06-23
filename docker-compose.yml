@@ -22,10 +22,10 @@ services:
       - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - SM_PRODUCT_ID=${SM_PRODUCT_ID:-380129dd-6ac3-47fc-a399-234394977680}
       - XMPRO_NOTEBOOK_PRODUCT_ID=${XMPRO_NOTEBOOK_PRODUCT_ID:-c6de3c46-e8ab-4c71-8787-947e6fd2292c}
-      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-7d28f9b5-da7c-7a3c-1083-318dd5e87e33}
-      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-600ea50f-9498-18b4-f860-3f70ff5c3eec}
-      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-c01fd265-9efe-873b-7a61-bbdb1731b677}
-      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-9b9d239a-29ad-b007-cae3-977235cfd2de}
+      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-98419bfc-78af-b430-0aad-59838debf571}
+      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-eb2c4593-9180-d18a-9291-85709155a33a}
+      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-71add0a9-3499-4158-42da-fd4faa7f0824}
+      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-5b5b92b0-6265-3f5b-5792-6f45c11a7a1c}
       - AI_PRODUCT_ENABLE=${AI_PRODUCT_ENABLE:-true}
   smdb:
     image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/smdb:${REGISTRY_VERSION:-4.5.0.95-alpha-adb7429392}
@@ -45,8 +45,8 @@ services:
         condition: service_completed_successfully
     environment:
       - DSDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
-      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-615df358-f273-44c6-9a5a-9013a78059e4}
-      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-BNntEVdpCPkpCYtDRZwbjhd19GQADSQT}
+      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-cc25ba78-2f03-4167-91f6-ffe5cb20fdbb}
+      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-QUjGHksRpQoOFBrMqSihOuKCGDGkBmyR}
       - DSDB_COLLECTION_NAME=${DSDB_COLLECTION_NAME:-COLLECTION 4.5.0-alpha}
   dsdb:
     image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdb:${REGISTRY_VERSION:-4.5.0.95-alpha-adb7429392}
@@ -80,11 +80,11 @@ services:
     restart: unless-stopped
     environment:
       - xm__consolelogging__minimumlevel__default=${SH_LOG_LEVEL:-Information}
-      - xm__xmpro__gateway__id=${SH_ID:-837fee18-bcd6-619f-3850-942eb3760fe4}
+      - xm__xmpro__gateway__id=${SH_ID:-18f4d750-0ca4-035f-d621-e006cb8f53c4}
       - xm__xmpro__gateway__name=${SH_NAME:-vsts-container}
       - xm__xmpro__gateway__serverurl=${DS_BASEURL_SERVER:-https://ds:8443/}
-      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-615df358-f273-44c6-9a5a-9013a78059e4}
-      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-BNntEVdpCPkpCYtDRZwbjhd19GQADSQT}
+      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-cc25ba78-2f03-4167-91f6-ffe5cb20fdbb}
+      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-QUjGHksRpQoOFBrMqSihOuKCGDGkBmyR}
       - xm__xmpro__gateway__featureFlags__enableApplicationInsightsTelemetry=false
       - xm__xmpro__gateway__featureflags__enablelegacycore=false
       - xm__xmpro__gateway__featureflags__enablelegacycrypto=false
@@ -114,7 +114,7 @@ services:
       - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://sm.host/}
       - xm__xmpro__xmidentity__client__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
       - xm__xmpro__xmidentity__client__id=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
-      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-7d28f9b5-da7c-7a3c-1083-318dd5e87e33}
+      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-98419bfc-78af-b430-0aad-59838debf571}
       - xm__xmpro__dataStreamDesigner__server__baseUrl=${DS_BASEURL_SERVER:-https://ds:8443/}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
       - xm__xmpro__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AD;User=${ADDB_USER:-someAdDbUser};Password=${ADDB_PASSWORD:-someAdDbPassword!}
@@ -148,7 +148,7 @@ services:
       - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://sm.host/}
       - xm__xmpro__xmidentity__client__id=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - xm__xmpro__xmidentity__client__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
-      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-c01fd265-9efe-873b-7a61-bbdb1731b677}
+      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-71add0a9-3499-4158-42da-fd4faa7f0824}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
       - xm__xmpro__keyVault__provider=
       - xm__xmpro__keyVault__name=
