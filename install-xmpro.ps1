@@ -748,6 +748,48 @@ if ($InstallPhase -eq 1) {
     }
 }
 
+# Function to configure WSL persistence to prevent 60-second timeout
+function Configure-WSLPersistence {
+    Write-Log "Configuring WSL persistence to prevent 60-second timeout..." -ForegroundColor Cyan
+    
+    try {
+        # Check if WSL-KeepAlive task already exists
+        $existingTask = Get-ScheduledTask -TaskName "WSL-KeepAlive" -ErrorAction SilentlyContinue
+        
+        if ($existingTask) {
+            Write-Log "WSL-KeepAlive scheduled task already exists" -ForegroundColor Yellow
+            Write-Log "WSL persistence is already configured" -ForegroundColor Green
+            return
+        }
+        
+        # Create scheduled task to keep WSL alive across reboots
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $action = New-ScheduledTaskAction -Execute "wsl" -Argument "--exec dbus-launch true"
+        
+        # Prompt for password for reliable task authentication
+        Write-Log "WSL persistence requires your user password for reliable task authentication." -ForegroundColor Yellow
+        $credential = Get-Credential -UserName $env:USERNAME -Message "Enter your password to enable WSL persistence"
+        
+        if ($credential) {
+            Register-ScheduledTask -TaskName "WSL-KeepAlive" -Trigger $trigger -Action $action -User $credential.UserName -Password $credential.GetNetworkCredential().Password -RunLevel Highest
+            Start-ScheduledTask -TaskName "WSL-KeepAlive"
+            Write-Log "WSL persistence scheduled task created successfully" -ForegroundColor Green
+        } else {
+            Write-Log "Password not provided. Attempting S4U method as fallback..." -ForegroundColor Yellow
+            $principal = New-ScheduledTaskPrincipal -UserID $env:USERNAME -LogonType S4U -RunLevel Highest
+            Register-ScheduledTask -TaskName "WSL-KeepAlive" -Trigger $trigger -Action $action -Principal $principal
+            Start-ScheduledTask -TaskName "WSL-KeepAlive"
+            Write-Log "WSL persistence configured with S4U method (may be less reliable)" -ForegroundColor Yellow
+        }
+        
+        Write-Log "WSL will remain active and prevent Docker container shutdowns" -ForegroundColor Green
+    }
+    catch {
+        Write-Log "Warning: Could not create WSL persistence task: $_" -ForegroundColor Yellow
+        Write-Log "You may need to manually keep WSL active for container persistence" -ForegroundColor Yellow
+    }
+}
+
 # Phase 2: Install Ubuntu on WSL with credentials
 if ($InstallPhase -eq 2) {
     Write-Log "Phase 2: Installing Ubuntu on WSL with credentials" -ForegroundColor Cyan
@@ -1279,6 +1321,7 @@ if ($global:CurrentPhase -eq 4 -or (-not $global:CurrentPhase -and -not $SkipApp
     Write-Log "Restarting WSL to ensure clean state..." -ForegroundColor Yellow
     try {
         wsl --shutdown
+        wsl --exec dbus-launch true
         Start-Sleep -Seconds 5
         wsl echo "WSL restarted successfully"
         Write-Log "WSL restarted successfully" -ForegroundColor Green
@@ -1449,6 +1492,9 @@ if ($global:CurrentPhase -eq 4 -or (-not $global:CurrentPhase -and -not $SkipApp
     else {
         Write-Log "Application deployment skipped. Run install-xmpro-application.ps1 manually to complete setup." -ForegroundColor Yellow
     }
+    
+    # Configure WSL persistence to prevent 60-second timeout (requires user password)
+    Configure-WSLPersistence
     
     # Mark Phase 4 as completed to prevent restart loop
     Write-Log "Phase 4 completed successfully!" -ForegroundColor Green
