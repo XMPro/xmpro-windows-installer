@@ -946,7 +946,7 @@ function New-SMSigningCertificate {
     Invoke-Expression $opensslCmd1
 
     # Export to PFX format using -legacy flag for .NET Framework compatibility (with certfile)
-    $opensslCmd2 = "wsl openssl pkcs12 -export -legacy -out `"$wslSignPfx`" -inkey `"$wslSignKey`" -in `"$wslSignCrt`" -certfile `"$wslSignCrt`" -passout pass:`"$CertificatePassword`""
+    $opensslCmd2 = "wsl openssl pkcs12 -export -legacy -out `"$wslSignPfx`" -inkey `"$wslSignKey`" -in `"$wslSignCrt`" -passout pass:`"$CertificatePassword`""
     Write-Log "Running: $opensslCmd2" -ForegroundColor Gray
     Invoke-Expression $opensslCmd2
 
@@ -1490,25 +1490,6 @@ function Install-XMProSM {
         # Keep the default ProductId already set in global variables
     }
 
-    # Clean up any duplicate certificates before running SM Install.ps1
-    Write-Log "Cleaning up duplicate certificates before SM Install.ps1..." -ForegroundColor Yellow
-    try {
-        $duplicateCerts = Get-ChildItem "Cert:\LocalMachine\My" | Where-Object { $_.Subject -ieq "CN=sm" }
-        if ($duplicateCerts.Count -gt 1) {
-            Write-Log "Found $($duplicateCerts.Count) certificates with CN=sm, removing duplicates..." -ForegroundColor Yellow
-            # Keep the newest certificate, remove the rest
-            $sortedCerts = $duplicateCerts | Sort-Object NotBefore -Descending
-            for ($i = 1; $i -lt $sortedCerts.Count; $i++) {
-                $certToRemove = $sortedCerts[$i]
-                Write-Log "Removing duplicate certificate: $($certToRemove.Thumbprint)" -ForegroundColor Yellow
-                Remove-Item -Path "Cert:\LocalMachine\My\$($certToRemove.Thumbprint)" -Force
-            }
-            Write-Log "Kept newest certificate: $($sortedCerts[0].Thumbprint)" -ForegroundColor Green
-        }
-    } catch {
-        Write-Log "Warning: Could not clean up duplicate certificates: $_" -ForegroundColor Yellow
-    }
-
     # Set all environment variables for SM Install.ps1 using centralized function
     Set-SMInstallEnvironmentVariables -SqlServerName $SqlServerName -SqlDatabaseName $SqlDatabaseName
 
@@ -1525,34 +1506,6 @@ function Install-XMProSM {
         # Build parameters hashtable based on what already exists
         $installParams = @{}
 
-        # Check if app pool already exists
-        $appPoolExists = Get-IISAppPool -Name $SmAppPoolName -ErrorAction SilentlyContinue
-        if ($appPoolExists) {
-            Write-Log "App pool $SmAppPoolName already exists, will skip creation" -ForegroundColor Yellow
-            $installParams['NoAppPool'] = $true
-        }
-
-        # Check if SSL certificate already exists
-        $sslCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\ssl.pfx"
-        if (Test-Path $sslCertPath) {
-            $sslCert = Get-ChildItem "Cert:\LocalMachine\My" | Where-Object { $_.Subject -like "CN=$($global:Hostname)*" } | Select-Object -First 1
-            if ($sslCert) {
-                Write-Log "SSL certificate found in certificate store, will skip import" -ForegroundColor Yellow
-                $installParams['NoSslCert'] = $true
-            }
-        }
-
-        # Check if token certificate already exists
-
-        # Check if SM IIS site already exists
-        $smSite = Get-Website -Name $SmWebsiteName -ErrorAction SilentlyContinue
-        if ($smSite) {
-            Write-Log "SM IIS site '$SmWebsiteName' already exists, will skip creation" -ForegroundColor Yellow
-            $installParams['NoSite'] = $true
-        }
-
-        $installParams['NoTokenCert'] = $true
-
         # Execute with dynamic parameters and capture output
         # Debug environment variables before calling Install.ps1
         Write-Log "Environment variables before calling SM Install.ps1:" -ForegroundColor Magenta
@@ -1560,6 +1513,7 @@ function Install-XMProSM {
         Write-Log "  BASE_URL: $($env:BASE_URL)" -ForegroundColor Magenta
         Write-Log "  SITE_NAME: $($env:SITE_NAME)" -ForegroundColor Magenta
 
+        & $installScriptPath -Uninstall *>&1 | Tee-Object -Variable smOutput | Write-Host
         if ($installParams.Count -gt 0) {
             $paramString = ($installParams.Keys | ForEach-Object { "-$_" }) -join ' '
             Write-Log "Executing SM Install.ps1 with parameters: $paramString" -ForegroundColor Cyan
@@ -1580,16 +1534,6 @@ function Install-XMProSM {
         Write-Log "                      SM INSTALL.PS1 COMPLETED SUCCESSFULLY                     " -ForegroundColor Cyan
         Write-Log "=================================================================================" -ForegroundColor Cyan
         Write-Log "" -ForegroundColor White
-
-        # Grant private key access now that Install.ps1 has created the app pool
-        if ($certThumbprint) {
-            Write-Log "Granting private key access after Install.ps1 completion..." -ForegroundColor Cyan
-            Grant-CertificatePrivateKeyAccess -CertificateThumbprint $certThumbprint -AppPoolName $SmAppPoolName
-        }
-
-        # Force update SSL binding with our certificate
-        Update-SSLBinding
-        Configure-SigningCertificate
 
         # Restart IIS AppPool to apply certificate changes
         Write-Log "Restarting IIS AppPool to apply certificate changes..." -ForegroundColor Yellow
@@ -1745,50 +1689,6 @@ function Add-CAToTrustStore {
     }
 }
 
-# Function to force update SSL binding with our certificate
-function Update-SSLBinding {
-    try {
-        Write-Log "Forcing SSL binding update with our certificate..." -ForegroundColor Cyan
-
-        $sslCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\ssl.pfx"
-        $siteName = $env:SITE_NAME
-        if (-not $siteName) { $siteName = "SM" }
-
-        if (Test-Path $sslCertPath) {
-            $pfxData = Get-PfxData $sslCertPath -Password $(ConvertTo-SecureString $CertificatePassword -AsPlainText -Force)
-            $certs = $pfxData.EndEntityCertificates
-            if ($certs.Length -eq 0) { throw "No certs found in $sslCertPath" }
-            if ($certs.Length -gt 1) { throw "More than one cert found in $sslCertPath" }
-            $cert = $certs[0]
-            $thumbprint = $cert.Thumbprint
-
-            Import-Module WebAdministration -ErrorAction SilentlyContinue
-
-            if (!(Test-Path "IIS:\Sites\$siteName")) {
-                Write-Log "$siteName IIS site not found - SSL binding update skipped" -ForegroundColor Yellow
-                return
-            }
-
-            $site = Get-Item "IIS:\Sites\$siteName"
-            $bindings = @($site.Bindings.Collection | Where-Object { $_.Protocol -eq 'https' })
-
-            foreach ($binding in $bindings) {
-                if ($binding.protocol -ine 'https') {
-                    Write-Log "Skipping non-HTTPS binding: $($binding.bindingInformation) (Protocol: $($binding.protocol))" -ForegroundColor Gray
-                    continue
-                }
-                Write-Log "Binding SSL cert to $siteName IIS site $($binding.bindingInformation)" -ForegroundColor Yellow
-                $binding.AddSslCertificate($thumbprint, 'My')
-            }
-
-            Write-Log "SSL binding force update completed" -ForegroundColor Green
-        } else {
-            Write-Log "SSL certificate not found at: $sslCertPath" -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Log "Warning: SSL binding force update failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-}
 
 # Function to deploy SM in IIS
 function Deploy-SMInIIS {
@@ -1804,315 +1704,6 @@ function Deploy-SMInIIS {
         exit
     }
 }
-
-
-
-
-# Function to grant certificate private key access after Install.ps1
-function Grant-CertificatePrivateKeyAccess {
-    param(
-        [string]$CertificateThumbprint,
-        [string]$AppPoolName = $SmAppPoolName
-    )
-
-    Write-Log "Granting private key access for certificate: $CertificateThumbprint" -ForegroundColor Cyan
-
-    try {
-        # Find the certificate in the store
-        $cert = Get-ChildItem "Cert:\LocalMachine\My" | Where-Object { $_.Thumbprint -eq $CertificateThumbprint }
-        if (-not $cert) {
-            Write-Log "Certificate not found in store" -ForegroundColor Red
-            return $false
-        }
-
-        # Use certutil to find the private key container
-        $certutilOutput = & certutil -store -v my $CertificateThumbprint 2>&1
-        $privateKeyLine = $certutilOutput | Where-Object { $_ -match "Unique container name:" }
-
-        if ($privateKeyLine -and $privateKeyLine -match "Unique container name:\s*(.+)") {
-            $containerName = $matches[1].Trim()
-            $keyPath = "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys\$containerName"
-
-            if (Test-Path $keyPath) {
-                # Grant full control for signing operations
-                icacls $keyPath /grant "IIS_IUSRS:(F)" 2>$null
-                Write-Log "Granted full private key access to IIS_IUSRS" -ForegroundColor Green
-
-                # Grant to specific app pool (should exist now)
-                $appPool = Get-IISAppPool -Name $AppPoolName -ErrorAction SilentlyContinue
-                if ($appPool) {
-                    icacls $keyPath /grant "IIS AppPool\${AppPoolName}:(F)" 2>$null
-                    Write-Log "Granted full private key access to app pool: $AppPoolName" -ForegroundColor Green
-                } else {
-                    Write-Log "App pool $AppPoolName still not found" -ForegroundColor Yellow
-                }
-
-                return $true
-            } else {
-                Write-Log "Private key file not found at: $keyPath" -ForegroundColor Yellow
-                return $false
-            }
-        } else {
-            Write-Log "Could not determine private key container name" -ForegroundColor Yellow
-            return $false
-        }
-    }
-    catch {
-        Write-Log "Error granting private key access: $_" -ForegroundColor Red
-        return $false
-    }
-}
-
-# Function to configure signing certificate with CSP compatibility and private key access
-function Configure-SigningCertificate {
-    param(
-        [string]$AppPoolName = $SmAppPoolName,
-        [string]$CertPassword = $CertificatePassword
-    )
-
-    Write-Log "Configuring signing certificate..." -ForegroundColor Cyan
-
-    try {
-        # Look for sign.pfx certificate (created above) or fallback to sm.pfx
-        $signCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\sign.pfx"
-        $smCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\sm.pfx"
-
-        $certPathToUse = $null
-        if (Test-Path $signCertPath) {
-            $certPathToUse = $signCertPath
-            Write-Log "Found signing certificate at: $signCertPath" -ForegroundColor Green
-        } elseif (Test-Path $smCertPath) {
-            $certPathToUse = $smCertPath
-            Write-Log "Found SM certificate at: $smCertPath" -ForegroundColor Green
-        }
-
-        if ($certPathToUse) {
-            # Import the certificate to Personal store
-            $importResult = Import-PfxCertificate -FilePath $certPathToUse -CertStoreLocation "Cert:\LocalMachine\My" -Password (ConvertTo-SecureString -String $CertPassword -AsPlainText -Force) -ErrorAction SilentlyContinue
-            
-            # Handle array return from Import-PfxCertificate
-            $cert = if ($importResult -is [System.Array]) { $importResult[0] } else { $importResult }
-
-            if ($cert) {
-                Write-Log "SM certificate imported with thumbprint: $($cert.Thumbprint)" -ForegroundColor Green
-                Write-Log "SM certificate subject: $($cert.Subject)" -ForegroundColor Green
-                Write-Log "SM certificate store location: LocalMachine\My" -ForegroundColor Green
-
-                # Check certificate CSP compatibility and fix if needed
-                Write-Log "Checking certificate CSP compatibility..." -ForegroundColor Yellow
-                try {
-                    $certCSP = ""
-                    if ($cert.HasPrivateKey) {
-                        try {
-                            # Test if we can access the private key for JWT signing
-                            $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-                            $testData = [System.Text.Encoding]::UTF8.GetBytes("test")
-                            $signature = $rsa.SignData($testData, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
-                            Write-Log "Certificate private key is accessible and compatible for JWT signing" -ForegroundColor Green
-                        } catch [System.Security.Cryptography.CryptographicException] {
-                            if ($_.Exception.Message -match "Invalid provider type") {
-                                Write-Log "Certificate has incompatible CSP - attempting to fix..." -ForegroundColor Yellow
-
-                                # Export and re-import certificate with compatible CSP
-                                $tempCertPath = "$env:TEMP\temp_sm_cert.pfx"
-                                $certPassword = ConvertTo-SecureString -String "temp123!" -AsPlainText -Force
-
-                                # Export current certificate
-                                Export-PfxCertificate -Cert $cert -FilePath $tempCertPath -Password $certPassword -Force | Out-Null
-
-                                # Remove old certificate
-                                Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -Force
-
-                                # Import with updated parameters for better CSP compatibility
-                                $newCert = Import-PfxCertificate -FilePath $tempCertPath -CertStoreLocation "Cert:\LocalMachine\My" -Password $certPassword -Exportable
-
-                                # Clean up temp file
-                                Remove-Item $tempCertPath -Force
-
-                                $cert = $newCert
-                                Write-Log "Certificate re-imported with compatible CSP" -ForegroundColor Green
-                            } else {
-                                throw $_
-                            }
-                        }
-                    }
-                } catch {
-                    Write-Log "Warning: Could not verify/fix certificate CSP compatibility: $($_.Exception.Message)" -ForegroundColor Yellow
-                }
-
-                # Grant IIS AppPool access to certificate private key
-                Write-Log "Granting IIS AppPool access to certificate private key..." -ForegroundColor Yellow
-                try {
-                    # Method 1: Try Ron's secure approach first - specific key file permissions
-                    if ($cert.HasPrivateKey) {
-                        try {
-                            Write-Log "Attempting secure method: specific key file permissions..." -ForegroundColor Yellow
-                            
-                            # Get the private key and find the specific key file (Ron's method)
-                            $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-                            $key = $rsa.Key
-                            $uniqueName = $key.UniqueName
-                            Write-Log "Key unique name: $uniqueName" -ForegroundColor Gray
-                            
-                            # Try to locate the specific private key file
-                            $keyPath = "C:\ProgramData\Microsoft\Crypto\Keys\$uniqueName"
-                            if (!(Test-Path $keyPath)) {
-                                $keyPath = "C:\ProgramData\Microsoft\Crypto\RSA\MachineKeys\$uniqueName"
-                            }
-                            
-                            if (Test-Path $keyPath) {
-                                Write-Log "Found specific key file: $keyPath" -ForegroundColor Green
-                                
-                                # Apply Ron's secure ACL method
-                                $acl = Get-Acl $keyPath
-                                $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS APPPOOL\$AppPoolName", 'FullControl', 'allow')
-                                $acl.AddAccessRule($rule)
-                                $rule2 = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS_IUSRS", 'FullControl', 'allow')
-                                $acl.AddAccessRule($rule2)
-                                Set-Acl $keyPath $acl
-                                
-                                Write-Log "Applied secure permissions to specific key file" -ForegroundColor Green
-                            } else {
-                                throw "Can't locate private key file with unique name $uniqueName"
-                            }
-                            
-                        } catch {
-                            Write-Log "Secure method failed: $($_.Exception.Message)" -ForegroundColor Yellow
-                            Write-Log "Falling back to broad permissions method..." -ForegroundColor Yellow
-                            
-                            # Fallback: Grant broader permissions to both key directories (icacls method)
-                            $machineKeysPath = "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys"
-                            $cngKeysPath = "$env:ProgramData\Microsoft\Crypto\Keys"
-                            
-                            icacls $machineKeysPath /grant "IIS AppPool\${AppPoolName}:(F)" /T 2>$null | Out-Null
-                            icacls $cngKeysPath /grant "IIS AppPool\${AppPoolName}:(F)" /T 2>$null | Out-Null
-                            icacls $machineKeysPath /grant "IIS_IUSRS:(F)" /T 2>$null | Out-Null
-                            icacls $cngKeysPath /grant "IIS_IUSRS:(F)" /T 2>$null | Out-Null
-                            
-                            Write-Log "Applied fallback certificate permissions to both CSP and CNG key stores" -ForegroundColor Yellow
-                        }
-                    }
-                } catch {
-                    Write-Log "Warning: Could not set certificate private key permissions: $($_.Exception.Message)" -ForegroundColor Yellow
-                    Write-Log "Certificate may work but if you see private key errors, manually grant IIS AppPool access" -ForegroundColor Yellow
-                }
-
-                return $cert.Thumbprint
-            } else {
-                Write-Log "Failed to import SM certificate. Using fallback certificate for signing only." -ForegroundColor Yellow
-                return $null
-            }
-        } else {
-            Write-Log "SM certificate not found. Using fallback certificate for signing only." -ForegroundColor Yellow
-            return $null
-        }
-    } catch {
-        Write-Log "Error configuring signing certificate: $_" -ForegroundColor Red
-        return $null
-    }
-}
-
-# Function to configure HTTPS bindings and hosts file
-function Configure-HttpsBindings {
-    param(
-        [string]$CertificateThumbprint,
-        [string]$Hostname = $global:Hostname
-    )
-
-    Write-Log "Configuring HTTPS bindings..." -ForegroundColor Cyan
-
-    try {
-        # Get the certificate from the store
-        $cert = Get-ChildItem "Cert:\LocalMachine\My" | Where-Object { $_.Thumbprint -eq $CertificateThumbprint }
-        if (-not $cert) {
-            Write-Log "Certificate with thumbprint $CertificateThumbprint not found in store" -ForegroundColor Red
-            return $false
-        }
-
-        # Add HTTPS binding to Default Web Site for the SM application
-        $httpsBindingExists = Get-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "$Hostname.local" -ErrorAction SilentlyContinue
-
-        if (-not $httpsBindingExists) {
-            Write-Log "Adding HTTPS binding for ${Hostname}.local:443..." -ForegroundColor Yellow
-            New-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "$Hostname.local" -SslFlags 1
-
-            # Bind the certificate to the HTTPS binding
-            $binding = Get-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "$Hostname.local"
-            $binding.AddSslCertificate($CertificateThumbprint, "My")
-
-            Write-Log "HTTPS binding configured successfully for https://${Hostname}.local:443/" -ForegroundColor Green
-        } else {
-            Write-Log "HTTPS binding already exists for ${Hostname}.local:443, updating certificate..." -ForegroundColor Yellow
-
-            # Update existing binding with new certificate
-            try {
-                $binding = Get-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "$Hostname.local"
-                if ($binding) {
-                    # Remove old certificate binding and add new one
-                    $binding.RemoveSslCertificate()
-                    $binding.AddSslCertificate($CertificateThumbprint, "My")
-                    Write-Log "HTTPS binding updated with new certificate" -ForegroundColor Green
-                }
-            } catch {
-                Write-Log "Could not update HTTPS binding certificate: $_" -ForegroundColor Yellow
-                Write-Log "You may need to manually update the certificate in IIS Manager" -ForegroundColor Yellow
-            }
-        }
-
-        # Also add HTTPS binding for "sm" hostname for easier access
-        $smHttpsBinding = Get-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "sm" -ErrorAction SilentlyContinue
-        if (-not $smHttpsBinding) {
-            try {
-                Write-Log "Adding HTTPS binding for sm:443..." -ForegroundColor Yellow
-                New-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "sm" -SslFlags 1
-                $smBinding = Get-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "sm"
-                $smBinding.AddSslCertificate($CertificateThumbprint, "My")
-                Write-Log "HTTPS binding for sm added successfully" -ForegroundColor Green
-            } catch {
-                Write-Log "Could not add sm HTTPS binding: $_" -ForegroundColor Yellow
-            }
-        } else {
-            Write-Log "HTTPS binding for sm already exists, updating certificate..." -ForegroundColor Yellow
-            try {
-                $smBinding = Get-WebBinding -Name "Default Web Site" -Protocol "https" -Port 443 -HostHeader "sm"
-                if ($smBinding) {
-                    $smBinding.RemoveSslCertificate()
-                    $smBinding.AddSslCertificate($CertificateThumbprint, "My")
-                    Write-Log "HTTPS binding for sm updated with new certificate" -ForegroundColor Green
-                }
-            } catch {
-                Write-Log "Could not update sm HTTPS binding certificate: $_" -ForegroundColor Yellow
-            }
-        }
-
-        # Add "sm" to hosts file idempotently
-        $hostsFile = "$env:SystemRoot\System32\drivers\etc\hosts"
-        $hostsEntry = "127.0.0.1`tsm"
-
-        try {
-            $hostsContent = Get-Content $hostsFile -ErrorAction SilentlyContinue
-            $smEntryExists = $hostsContent | Where-Object { $_ -match "^\s*127\.0\.0\.1\s+sm\s*$" }
-
-            if (-not $smEntryExists) {
-                Write-Log "Adding 'sm' to hosts file..." -ForegroundColor Yellow
-                Add-Content -Path $hostsFile -Value $hostsEntry -Encoding ASCII
-                Write-Log "Added '127.0.0.1 sm' to hosts file" -ForegroundColor Green
-            } else {
-                Write-Log "'sm' already exists in hosts file" -ForegroundColor Green
-            }
-        } catch {
-            Write-Log "Could not update hosts file: $_" -ForegroundColor Yellow
-            Write-Log "You may need to manually add '127.0.0.1 sm' to $hostsFile" -ForegroundColor Yellow
-        }
-
-        return $true
-    } catch {
-        Write-Log "Error configuring HTTPS binding: $_" -ForegroundColor Yellow
-        Write-Log "SM application will use HTTP only." -ForegroundColor Yellow
-        return $false
-    }
-}
-
 
 # Function to wait for database migration containers to complete
 function Wait-ForMigrationContainers {
