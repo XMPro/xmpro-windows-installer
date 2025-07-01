@@ -222,6 +222,332 @@ function Register-ScriptForAfterRestart {
     }
 }
 
+# Function to install Docker in WSL with retry logic
+function Install-DockerInWSL {
+    param (
+        [string]$DockerComposeVersion
+    )
+    
+    # Check if Docker is already installed in WSL
+    $dockerCheckResult = wsl -d Ubuntu -e bash -c "command -v docker && docker --version" 2>&1
+    if ($dockerCheckResult -match "Docker version") {
+        Write-Log "Docker is already installed in WSL2 Ubuntu: $dockerCheckResult" -ForegroundColor Green
+        return $true
+    }
+    
+    Write-Log "Docker not found in WSL2 Ubuntu. Installing..." -ForegroundColor Yellow
+    
+    $dockerInstallSuccess = $false
+    $dockerMaxRetries = 3
+    
+    for ($dockerAttempt = 1; $dockerAttempt -le $dockerMaxRetries; $dockerAttempt++) {
+        Write-Log "Docker installation attempt $dockerAttempt of $dockerMaxRetries..." -ForegroundColor Yellow
+        
+        try {
+            # Docker installation commands for Ubuntu (without docker-compose)
+        $dockerInstallCommands = @"
+#!/bin/bash
+# Enable command echo to see each command as it executes
+set -x
+
+# Update package index and install prerequisites
+apt-get update
+apt-get install -y ca-certificates curl gnupg
+
+# Add Docker's official GPG key
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Get Ubuntu version codename using lsb_release
+UBUNTU_CODENAME=`$(lsb_release -cs)
+echo "Ubuntu version codename: `$UBUNTU_CODENAME"
+
+# Add the repository to Apt sources
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu `$UBUNTU_CODENAME stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker Engine
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Enable Docker service to start on boot
+systemctl enable docker.service
+
+# Start Docker service
+service docker start
+
+# Verify Docker installation
+echo "Docker Version:"
+docker --version
+
+# Verify Docker service status
+echo "Docker Service Status:"
+service docker status
+
+"@
+
+            # Save the script to the XMPRO installation directory
+            $dockerScriptPath = "$global:PersistentDir\docker-wsl-install.sh"
+            $dockerInstallCommands | Out-File -FilePath $dockerScriptPath -Encoding ASCII
+            
+            # Make the script accessible from WSL
+            $wslPath = "/mnt/c" + $dockerScriptPath.Substring(2).Replace("\", "/")
+            
+            # Execute the script in WSL and display output to both console and log file
+            Write-Log "Executing Docker installation script in WSL2..." -ForegroundColor Yellow
+            Write-Log "Command: wsl -d Ubuntu -u root bash $wslPath" -ForegroundColor Yellow
+            
+            # Run the command, capture output, and write to both console and log file
+            Write-Log "--- WSL Docker Installation Output (Attempt $dockerAttempt) ---" -ForegroundColor Cyan
+
+            # Capture the output and write to both console and log file
+            $wslOutput = wsl -d Ubuntu -u root bash $wslPath 2>&1
+            $wslOutput | ForEach-Object {
+                Write-Log $_ -ForegroundColor White
+            }
+
+            Write-Log "--- End of WSL Docker Installation Output (Attempt $dockerAttempt) ---" -ForegroundColor Cyan
+            
+            # Verify installation was successful
+            Start-Sleep -Seconds 3
+            $dockerVerifyResult = wsl -d Ubuntu -e bash -c "command -v docker && docker --version" 2>&1
+            if ($dockerVerifyResult -match "Docker version") {
+                Write-Log "Docker installation successful: $dockerVerifyResult" -ForegroundColor Green
+                Write-Log "Docker installation script saved at: $dockerScriptPath" -ForegroundColor Green
+                $dockerInstallSuccess = $true
+                break
+            } else {
+                Write-Log "Docker installation verification failed on attempt $dockerAttempt" -ForegroundColor Red
+                if ($dockerAttempt -lt $dockerMaxRetries) {
+                    Write-Log "Retrying Docker installation in 10 seconds..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 10
+                }
+            }
+        }
+        catch {
+            Write-Log "Error during Docker installation attempt ${dockerAttempt}: $_" -ForegroundColor Red
+            if ($dockerAttempt -lt $dockerMaxRetries) {
+                Write-Log "Retrying Docker installation in 10 seconds..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 10
+            }
+        }
+    }
+    
+    if (-not $dockerInstallSuccess) {
+        Write-Error "Docker installation failed after $dockerMaxRetries attempts"
+        return $false
+    }
+    
+    return $true
+}
+
+# Function to download files with multiple methods and retry logic
+function Download-FileWithRetry {
+    param (
+        [string]$Url,
+        [string]$OutputPath,
+        [string]$Description = "file",
+        [int]$MaxRetries = 3
+    )
+    
+    Write-Log "Downloading $Description from $Url..." -ForegroundColor Yellow
+    
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        Write-Log "Download attempt $attempt of $MaxRetries for $Description..." -ForegroundColor Yellow
+        
+        # Remove any existing partial download
+        if (Test-Path $OutputPath) {
+            Remove-Item -Path $OutputPath -Force -ErrorAction SilentlyContinue
+        }
+        
+        $success = $false
+        
+        # Method 1: BITS transfer (fastest for large files)
+        if ($attempt -eq 1) {
+            try {
+                Write-Log "Attempt ${attempt}: Using BITS transfer for $Description..." -ForegroundColor Cyan
+                $bitsJob = Start-BitsTransfer -Source $Url -Destination $OutputPath -Asynchronous -DisplayName "$Description Download"
+                
+                # Monitor the download with timeout (10 minutes)
+                $timeout = 600
+                $timer = 0
+                
+                while ($bitsJob.JobState -eq "Transferring" -and $timer -lt $timeout) {
+                    Start-Sleep -Seconds 10
+                    $timer += 10
+                    if ($bitsJob.BytesTotal -gt 0) {
+                        $progress = [math]::Round(($bitsJob.BytesTransferred / $bitsJob.BytesTotal) * 100, 1)
+                        Write-Log "Download progress: $progress% ($([math]::Round($bitsJob.BytesTransferred / 1MB, 1))MB / $([math]::Round($bitsJob.BytesTotal / 1MB, 1))MB)" -ForegroundColor Cyan
+                    }
+                }
+                
+                if ($bitsJob.JobState -eq "Transferred") {
+                    Complete-BitsTransfer -BitsJob $bitsJob
+                    $success = $true
+                    Write-Log "$Description download completed successfully using BITS." -ForegroundColor Green
+                } else {
+                    if ($bitsJob.ErrorCondition) {
+                        Write-Log "BITS Error: $($bitsJob.ErrorDescription)" -ForegroundColor Red
+                    }
+                    Remove-BitsTransfer -BitsJob $bitsJob -ErrorAction SilentlyContinue
+                }
+            }
+            catch {
+                Write-Log "BITS transfer failed for $Description : $_" -ForegroundColor Red
+                Remove-BitsTransfer -BitsJob $bitsJob -ErrorAction SilentlyContinue
+            }
+        }
+        # Method 2: curl.exe (reliable fallback)
+        elseif ($attempt -eq 2) {
+            try {
+                Write-Log "Attempt ${attempt}: Using curl.exe for $Description..." -ForegroundColor Yellow
+                $curlResult = curl.exe -L -o $OutputPath $Url --progress-bar
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $OutputPath)) {
+                    $success = $true
+                    Write-Log "$Description download completed successfully using curl.exe." -ForegroundColor Green
+                } else {
+                    Write-Log "curl.exe failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+                }
+            }
+            catch {
+                Write-Log "curl.exe failed for $Description : $_" -ForegroundColor Red
+            }
+        }
+        # Method 3: Invoke-WebRequest (final fallback)
+        else {
+            try {
+                Write-Log "Attempt ${attempt}: Using Invoke-WebRequest for $Description..." -ForegroundColor Yellow
+                Invoke-WebRequest -Uri $Url -OutFile $OutputPath -UseBasicParsing
+                if (Test-Path $OutputPath) {
+                    $success = $true
+                    Write-Log "$Description download completed successfully using Invoke-WebRequest." -ForegroundColor Green
+                } else {
+                    Write-Log "Invoke-WebRequest failed - file not created" -ForegroundColor Red
+                }
+            }
+            catch {
+                Write-Log "Invoke-WebRequest failed for $Description : $_" -ForegroundColor Red
+            }
+        }
+        
+        # Check if download was successful
+        if ($success -and (Test-Path $OutputPath)) {
+            $fileSize = (Get-Item $OutputPath).Length
+            if ($fileSize -gt 0) {
+                Write-Log "$Description download successful. File size: $([math]::Round($fileSize / 1MB, 1))MB" -ForegroundColor Green
+                return $true
+            } else {
+                Write-Log "$Description download resulted in empty file" -ForegroundColor Red
+                Remove-Item -Path $OutputPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        
+        # If not the last attempt, wait before retrying
+        if ($attempt -lt $MaxRetries) {
+            Write-Log "Retrying $Description download in 10 seconds..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
+        }
+    }
+    
+    Write-Log "CRITICAL ERROR: Failed to download $Description after $MaxRetries attempts using all methods (BITS, curl.exe, Invoke-WebRequest)" -ForegroundColor Red
+    return $false
+}
+
+# Function to install Docker Compose in WSL with retry logic
+function Install-DockerComposeInWSL {
+    param (
+        [string]$DockerComposeVersion
+    )
+    
+    # Check if Docker Compose is already installed in WSL (separate check)
+    $dockerComposeCheckResult = wsl -d Ubuntu -e bash -c "command -v docker-compose && docker-compose --version" 2>&1
+    if ($dockerComposeCheckResult -match "Docker Compose version") {
+        Write-Log "Docker Compose is already installed in WSL2 Ubuntu: $dockerComposeCheckResult" -ForegroundColor Green
+        return $true
+    }
+    
+    Write-Log "Docker Compose not found in WSL2 Ubuntu. Installing..." -ForegroundColor Yellow
+    
+    $composeInstallSuccess = $false
+    $composeMaxRetries = 3
+    
+    for ($composeAttempt = 1; $composeAttempt -le $composeMaxRetries; $composeAttempt++) {
+        Write-Log "Docker Compose installation attempt $composeAttempt of $composeMaxRetries..." -ForegroundColor Yellow
+        
+        try {
+            # Docker Compose installation commands for Ubuntu
+        $dockerComposeInstallCommands = @"
+#!/bin/bash
+# Enable command echo to see each command as it executes
+set -x
+
+# Install standalone Docker Compose
+COMPOSE_VERSION="v$DockerComposeVersion"
+curl -L "https://github.com/docker/compose/releases/download/`${COMPOSE_VERSION}/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+
+# Verify Docker Compose installation
+echo "Docker Compose Version:"
+docker-compose --version
+
+"@
+
+            # Save the script to the XMPRO installation directory
+            $dockerComposeScriptPath = "$global:PersistentDir\docker-compose-wsl-install.sh"
+            $dockerComposeInstallCommands | Out-File -FilePath $dockerComposeScriptPath -Encoding ASCII
+            
+            # Make the script accessible from WSL
+            $wslComposePath = "/mnt/c" + $dockerComposeScriptPath.Substring(2).Replace("\", "/")
+            
+            # Execute the script in WSL and display output to both console and log file
+            Write-Log "Executing Docker Compose installation script in WSL2..." -ForegroundColor Yellow
+            Write-Log "Command: wsl -d Ubuntu -u root bash $wslComposePath" -ForegroundColor Yellow
+            
+            # Run the command, capture output, and write to both console and log file
+            Write-Log "--- WSL Docker Compose Installation Output (Attempt $composeAttempt) ---" -ForegroundColor Cyan
+
+            # Capture the output and write to both console and log file
+            $wslComposeOutput = wsl -d Ubuntu -u root bash $wslComposePath 2>&1
+            $wslComposeOutput | ForEach-Object {
+                Write-Log $_ -ForegroundColor White
+            }
+
+            Write-Log "--- End of WSL Docker Compose Installation Output (Attempt $composeAttempt) ---" -ForegroundColor Cyan
+            
+            # Verify installation was successful
+            Start-Sleep -Seconds 3
+            $composeVerifyResult = wsl -d Ubuntu -e bash -c "command -v docker-compose && docker-compose --version" 2>&1
+            if ($composeVerifyResult -match "Docker Compose version") {
+                Write-Log "Docker Compose installation successful: $composeVerifyResult" -ForegroundColor Green
+                Write-Log "Docker Compose installation script saved at: $dockerComposeScriptPath" -ForegroundColor Green
+                $composeInstallSuccess = $true
+                break
+            } else {
+                Write-Log "Docker Compose installation verification failed on attempt $composeAttempt" -ForegroundColor Red
+                if ($composeAttempt -lt $composeMaxRetries) {
+                    Write-Log "Retrying Docker Compose installation in 10 seconds..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 10
+                }
+            }
+        }
+        catch {
+            Write-Log "Error during Docker Compose installation attempt ${composeAttempt}: $_" -ForegroundColor Red
+            if ($composeAttempt -lt $composeMaxRetries) {
+                Write-Log "Retrying Docker Compose installation in 10 seconds..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 10
+            }
+        }
+    }
+    
+    if (-not $composeInstallSuccess) {
+        Write-Error "Docker Compose installation failed after $composeMaxRetries attempts"
+        return $false
+    }
+    
+    return $true
+}
+
 # Function to handle restart
 function Handle-Restart {
     param (
@@ -865,94 +1191,14 @@ if ($InstallPhase -eq 2) {
     if (-not $hasUbuntu -or -not $ubuntuRunning) {
         Write-Log "No Ubuntu distribution found. Installing Ubuntu..." -ForegroundColor Yellow
         
-        # Install Ubuntu using direct AppX package download with retry logic
+        # Download Ubuntu AppX package using robust download function
         $ubuntuAppxFile = "$env:TEMP\Ubuntu2004.appx"
-        $maxRetries = 3
-        $downloadSuccess = $false
+        Write-Log "Ubuntu package is large (~400MB), this may take several minutes..." -ForegroundColor Yellow
         
-        for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-            try {
-                Write-Log "Downloading Ubuntu AppX package from $UbuntuAppxUrl (Attempt $attempt of $maxRetries)..." -ForegroundColor Yellow
-                Write-Log "Ubuntu package is large (~400MB), this may take several minutes..." -ForegroundColor Yellow
-                
-                # Remove any existing partial download
-                if (Test-Path $ubuntuAppxFile) {
-                    Remove-Item -Path $ubuntuAppxFile -Force
-                }
-                
-                # Try BITS first, then curl.exe, then Invoke-WebRequest as final fallback
-                if ($attempt -eq 1) {
-                    Write-Log "Attempt ${attempt}: Using BITS transfer..." -ForegroundColor Cyan
-                    $bitsJob = Start-BitsTransfer -Source $UbuntuAppxUrl -Destination $ubuntuAppxFile -Asynchronous -DisplayName "Ubuntu Download"
-                } elseif ($attempt -eq 2) {
-                    Write-Log "Attempt ${attempt}: BITS failed, using curl.exe..." -ForegroundColor Yellow
-                    $curlResult = curl.exe -L -o $ubuntuAppxFile $UbuntuAppxUrl --progress-bar
-                    if ($LASTEXITCODE -eq 0 -and (Test-Path $ubuntuAppxFile)) {
-                        $downloadSuccess = $true
-                        Write-Log "Ubuntu download completed successfully using curl.exe." -ForegroundColor Green
-                        break
-                    } else {
-                        Write-Log "curl.exe failed with exit code: $LASTEXITCODE" -ForegroundColor Red
-                    }
-                } else {
-                    Write-Log "Attempt ${attempt}: curl.exe failed, using Invoke-WebRequest fallback..." -ForegroundColor Yellow
-                    Invoke-WebRequest -Uri $UbuntuAppxUrl -OutFile $ubuntuAppxFile -UseBasicParsing
-                    $downloadSuccess = $true
-                    Write-Log "Ubuntu download completed successfully using Invoke-WebRequest." -ForegroundColor Green
-                    break
-                }
-                
-                # Monitor the download with timeout (10 minutes)
-                $timeout = 600 # 10 minutes in seconds
-                $timer = 0
-                
-                while ($bitsJob.JobState -eq "Transferring" -and $timer -lt $timeout) {
-                    Start-Sleep -Seconds 10
-                    $timer += 10
-                    $progress = [math]::Round(($bitsJob.BytesTransferred / $bitsJob.BytesTotal) * 100, 1)
-                    if ($bitsJob.BytesTotal -gt 0) {
-                        Write-Log "Download progress: $progress% ($([math]::Round($bitsJob.BytesTransferred / 1MB, 1))MB / $([math]::Round($bitsJob.BytesTotal / 1MB, 1))MB)" -ForegroundColor Cyan
-                    }
-                }
-                
-                if ($bitsJob.JobState -eq "Transferred") {
-                    Complete-BitsTransfer -BitsJob $bitsJob
-                    $downloadSuccess = $true
-                    Write-Log "Ubuntu download completed successfully." -ForegroundColor Green
-                    break
-                } elseif ($bitsJob.JobState -eq "Error") {
-                    $errorMsg = $bitsJob.ErrorDescription
-                    Remove-BitsTransfer -BitsJob $bitsJob
-                    Write-Log "Download failed with error: $errorMsg" -ForegroundColor Red
-                } else {
-                    # Check actual job state for debugging
-                    Write-Log "BITS job exited monitoring loop. Job State: $($bitsJob.JobState)" -ForegroundColor Yellow
-                    Write-Log "Timer value: $timer seconds (timeout: $timeout seconds)" -ForegroundColor Yellow
-                    if ($bitsJob.ErrorCondition) {
-                        Write-Log "BITS Error Condition: $($bitsJob.ErrorCondition)" -ForegroundColor Red
-                        Write-Log "BITS Error Context: $($bitsJob.ErrorContext)" -ForegroundColor Red
-                        Write-Log "BITS Error Context Description: $($bitsJob.ErrorContextDescription)" -ForegroundColor Red
-                    }
-                    Remove-BitsTransfer -BitsJob $bitsJob
-                    Write-Log "Download failed. Actual job state: $($bitsJob.JobState)" -ForegroundColor Red
-                }
-                
-                if ($attempt -lt $maxRetries) {
-                    Write-Log "Retrying download in 10 seconds..." -ForegroundColor Yellow
-                    Start-Sleep -Seconds 10
-                }
-            }
-            catch {
-                Write-Log "Download attempt $attempt failed: $($_.Exception.Message)" -ForegroundColor Red
-                if ($attempt -lt $maxRetries) {
-                    Write-Log "Retrying download in 30 seconds..." -ForegroundColor Yellow
-                    Start-Sleep -Seconds 10
-                }
-            }
-        }
+        $downloadSuccess = Download-FileWithRetry -Url $UbuntuAppxUrl -OutputPath $ubuntuAppxFile -Description "Ubuntu AppX package"
         
         if (-not $downloadSuccess) {
-            Write-Error "CRITICAL ERROR: Failed to download Ubuntu after $maxRetries attempts. Cannot proceed with installation."
+            Write-Log "CRITICAL ERROR: Failed to download Ubuntu AppX package" -ForegroundColor Red
             Write-Log "This is a critical failure. The installation cannot continue without Ubuntu." -ForegroundColor Red
             Write-Log "Please check your internet connection and try again, or manually download Ubuntu from Microsoft Store." -ForegroundColor Red
             Read-Host "Press Enter to exit"
@@ -967,21 +1213,26 @@ if ($InstallPhase -eq 2) {
             $vcLibsUrl = "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx"
             $vcLibsFile = "$env:TEMP\Microsoft.VCLibs.x64.14.00.Desktop.appx"
             
-            try {
-                Write-Log "Downloading Microsoft.VCLibs.140.00.UWPDesktop..." -ForegroundColor Yellow
-                curl.exe -L -o $vcLibsFile $vcLibsUrl
-                if ($LASTEXITCODE -eq 0 -and (Test-Path $vcLibsFile)) {
+            $vcLibsDownloadSuccess = Download-FileWithRetry -Url $vcLibsUrl -OutputPath $vcLibsFile -Description "Microsoft.VCLibs.140.00.UWPDesktop"
+            
+            if ($vcLibsDownloadSuccess) {
+                try {
                     Write-Log "Installing Microsoft.VCLibs.140.00.UWPDesktop..." -ForegroundColor Yellow
                     Add-AppxPackage -Path $vcLibsFile -ForceApplicationShutdown
                     Remove-Item -Path $vcLibsFile -Force -ErrorAction SilentlyContinue
                     Write-Log "Microsoft.VCLibs.140.00.UWPDesktop installed successfully." -ForegroundColor Green
-                } else {
-                    Write-Log "Warning: Could not download Microsoft.VCLibs.140.00.UWPDesktop dependency" -ForegroundColor Yellow
                 }
-            }
-            catch {
-                Write-Log "Warning: Could not install Microsoft.VCLibs.140.00.UWPDesktop dependency: $_" -ForegroundColor Yellow
-                Write-Log "Continuing with Ubuntu installation..." -ForegroundColor Yellow
+                catch {
+                    Write-Log "CRITICAL ERROR: Failed to install Microsoft.VCLibs.140.00.UWPDesktop dependency: $_" -ForegroundColor Red
+                    Write-Log "This dependency is required for Ubuntu 22.04 installation" -ForegroundColor Red
+                    Read-Host "Press Enter to exit"
+                    exit 1
+                }
+            } else {
+                Write-Log "CRITICAL ERROR: Failed to download Microsoft.VCLibs.140.00.UWPDesktop dependency" -ForegroundColor Red
+                Write-Log "This dependency is required for Ubuntu 22.04 installation" -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
             }
             
             # Install the AppX package directly
@@ -1189,94 +1440,26 @@ if ($InstallPhase -eq 3) {
     
     # Install Docker inside WSL2 Ubuntu
     Write-Log "Installing Docker inside WSL2 Ubuntu..." -ForegroundColor Yellow
+    $dockerSuccess = Install-DockerInWSL -DockerComposeVersion $DockerComposeVersion
     
-    # Check if Docker is already installed in WSL
-    $dockerCheckResult = wsl -d Ubuntu -e bash -c "command -v docker && docker --version" 2>&1
-    if ($dockerCheckResult -match "Docker version") {
-        Write-Log "Docker is already installed in WSL2 Ubuntu: $dockerCheckResult" -ForegroundColor Green
-    } else {
-        Write-Log "Docker not found in WSL2 Ubuntu. Installing..." -ForegroundColor Yellow
-        try {
-            # Docker installation commands for Ubuntu
-        $dockerInstallCommands = @"
-#!/bin/bash
-# Enable command echo to see each command as it executes
-set -x
-
-# Update package index and install prerequisites
-apt-get update
-apt-get install -y ca-certificates curl gnupg
-
-# Add Docker's official GPG key
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
-
-# Get Ubuntu version codename using lsb_release
-UBUNTU_CODENAME=`$(lsb_release -cs)
-echo "Ubuntu version codename: `$UBUNTU_CODENAME"
-
-# Add the repository to Apt sources
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu `$UBUNTU_CODENAME stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# Install Docker Engine
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# Install standalone Docker Compose
-COMPOSE_VERSION="v$DockerComposeVersion"
-curl -L "https://github.com/docker/compose/releases/download/`${COMPOSE_VERSION}/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
-ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-
-# Enable Docker service to start on boot
-systemctl enable docker.service
-
-# Start Docker service
-service docker start
-
-# Verify Docker installation
-echo "Docker Version:"
-docker --version
-
-# Verify Docker Compose installation
-echo "Docker Compose Version:"
-docker-compose --version
-
-# Verify Docker service status
-echo "Docker Service Status:"
-service docker status
-
-"@
-
-            # Save the script to the XMPRO installation directory
-            $dockerScriptPath = "$global:PersistentDir\docker-wsl-install.sh"
-            $dockerInstallCommands | Out-File -FilePath $dockerScriptPath -Encoding ASCII
-            
-            # Make the script accessible from WSL
-            $wslPath = "/mnt/c" + $dockerScriptPath.Substring(2).Replace("\", "/")
-            
-            # Execute the script in WSL and display output to both console and log file
-            Write-Log "Executing Docker installation script in WSL2..." -ForegroundColor Yellow
-            Write-Log "Command: wsl -d Ubuntu -u root bash $wslPath" -ForegroundColor Yellow
-            
-            # Run the command, capture output, and write to both console and log file
-            Write-Log "--- WSL Docker Installation Output ---" -ForegroundColor Cyan
-
-            # Capture the output and write to both console and log file
-            $wslOutput = wsl -d Ubuntu -u root bash $wslPath 2>&1
-            $wslOutput | ForEach-Object {
-                Write-Log $_ -ForegroundColor White
-            }
-
-            
-            Write-Log "--- End of WSL Docker Installation Output ---" -ForegroundColor Cyan
-            
-            Write-Log "Docker installation script saved at: $dockerScriptPath" -ForegroundColor Green
-        }
-        catch {
-            Write-Error "An error occurred while installing Docker in WSL2: ${_}"
-        }
+    # Exit if Docker installation failed (critical for XMPro deployment)
+    if (-not $dockerSuccess) {
+        Write-Log "CRITICAL: Docker installation failed. Cannot proceed with XMPro deployment." -ForegroundColor Red
+        Write-Log "Docker is required for the XMPro platform deployment." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+    
+    # Install Docker Compose inside WSL2 Ubuntu
+    Write-Log "Installing Docker Compose inside WSL2 Ubuntu..." -ForegroundColor Yellow
+    $composeSuccess = Install-DockerComposeInWSL -DockerComposeVersion $DockerComposeVersion
+    
+    # Exit if Docker Compose installation failed (critical for XMPro deployment)
+    if (-not $composeSuccess) {
+        Write-Log "CRITICAL: Docker Compose installation failed. Cannot proceed with XMPro deployment." -ForegroundColor Red
+        Write-Log "Docker Compose is required for the XMPro platform deployment." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
     }
     
     Write-Log "Phase 3 completed successfully!" -ForegroundColor Green
