@@ -1,6 +1,6 @@
 services:
   smdbmigrate:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/smdbmigrate:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/smdbmigrate:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
     depends_on:
       smdb:
         condition: service_completed_successfully
@@ -22,82 +22,37 @@ services:
       - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - SM_PRODUCT_ID=${SM_PRODUCT_ID:-380129dd-6ac3-47fc-a399-234394977680}
       - XMPRO_NOTEBOOK_PRODUCT_ID=${XMPRO_NOTEBOOK_PRODUCT_ID:-c6de3c46-e8ab-4c71-8787-947e6fd2292c}
-      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-a3700e51-9be1-1584-486c-d863c6042535}
-      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-5257aeef-dd6f-54e8-b4d6-de073eed478f}
-      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-5aa3b71b-1754-18ec-84a5-94a6ea9e7f5a}
-      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-b6fe46cf-d3cc-93de-6550-f8aecca5a57c}
+      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-a310c805-8859-f5b8-5d30-524c7a9eb161}
+      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-a851f3b6-e2b2-258c-3d9e-82074b7bbb77}
+      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-4d47e2da-d022-d613-3a97-e2ba5df197bb}
+      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-0f8c21a7-b716-0947-dba8-7e439bb67c1f}
       - AI_PRODUCT_ENABLE=${AI_PRODUCT_ENABLE:-true}
-  smdb:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/smdb:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
+  licenses:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/licenses:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
+    depends_on:
+      smdbmigrate:
+        condition: service_completed_successfully
     environment:
       - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
       - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
       - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
       - SQLCMDUSER=${DB_SA_USER:-sa}
       - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
+      - SQLCMDDBNAME=master
     
       - SMDB_USER=${SMDB_USER:-someSmDbUser}
       - SMDB_PASSWORD=${SMDB_PASSWORD:-someSmDbPassword!}
-  dsdbmigrate:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdbmigrate:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
-    depends_on:
-      dsdb:
-        condition: service_completed_successfully
-    environment:
-      - DSDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
-      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-434431d7-6b0a-434e-9118-f3da67d58591}
-      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-x7FtgkqEGIBWsupun5HdAPhgfDuvFZm2}
-      - DSDB_COLLECTION_NAME=${DSDB_COLLECTION_NAME:-COLLECTION 4.5.0-alpha}
-  dsdb:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdb:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
-    environment:
-      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
-      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
-      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
-      - SQLCMDUSER=${DB_SA_USER:-sa}
-      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
-    
-      - DSDB_USER=${DSDB_USER:-someDsDbUser}
-      - DSDB_PASSWORD=${DSDB_PASSWORD:-someDsDbPassword!}
-  addb:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/addb:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
-    environment:
-      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
-      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
-      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
-      - SQLCMDUSER=${DB_SA_USER:-sa}
-      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
-    
-      - ADDB_USER=${ADDB_USER:-someAdDbUser}
-      - ADDB_PASSWORD=${ADDB_PASSWORD:-someAdDbPassword!}
-  sh:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/stream-host:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
-    depends_on:
-      dsdb:
-        condition: service_completed_successfully
-      ds:
-        condition: service_healthy
-    restart: unless-stopped
-    environment:
-      - xm__consolelogging__minimumlevel__default=${SH_LOG_LEVEL:-Information}
-      - xm__xmpro__gateway__id=${SH_ID:-0745ab8d-4465-ccd6-a1c2-9390dc20a027}
-      - xm__xmpro__gateway__name=${SH_NAME:-vsts-container}
-      - xm__xmpro__gateway__serverurl=${DS_BASEURL_SERVER:-https://ds:8443/}
-      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-434431d7-6b0a-434e-9118-f3da67d58591}
-      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-x7FtgkqEGIBWsupun5HdAPhgfDuvFZm2}
-      - xm__xmpro__gateway__featureFlags__enableApplicationInsightsTelemetry=false
-      - xm__xmpro__gateway__featureflags__enablelegacycore=false
-      - xm__xmpro__gateway__featureflags__enablelegacycrypto=false
-      - xm__xmpro__XMCryptography__TripleDES__Key=
-    volumes:
-      - ${CERTIFICATES_DIR:-./certs}/certs:/certs
-      - ${CERTIFICATES_DIR:-./certs}/trustedcerts:/trustedcerts
+      - COMPANY_ADMIN_EMAILADDRESS=${COMPANY_ADMIN_EMAILADDRESS:-evaluation@xmpro.com}
+      - COMPANY_ID=${COMPANY_ID:-2}
+      - LICENSE_API_URL=${LICENSE_API_URL:-https://fa-xmrlicense-nonprod.azurewebsites.net/api/license}
+      - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
+      - AD_PRODUCT_ID=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
   ad:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ad:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ad:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
     depends_on:
-      addb:
-        condition: service_completed_successfully
       addbmigrate:
+        condition: service_completed_successfully
+      addb:
         condition: service_completed_successfully
     ports:
       - "${AD_PORT:-5202}:8443"
@@ -114,7 +69,7 @@ services:
       - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://sm.host/}
       - xm__xmpro__xmidentity__client__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
       - xm__xmpro__xmidentity__client__id=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
-      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-a3700e51-9be1-1584-486c-d863c6042535}
+      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-a310c805-8859-f5b8-5d30-524c7a9eb161}
       - xm__xmpro__dataStreamDesigner__server__baseUrl=${DS_BASEURL_SERVER:-https://ds:8443/}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
       - xm__xmpro__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AD;User=${ADDB_USER:-someAdDbUser};Password=${ADDB_PASSWORD:-someAdDbPassword!}
@@ -124,7 +79,7 @@ services:
       - ${CERTIFICATES_DIR:-./certs}/certs:/certs
       - ${CERTIFICATES_DIR:-./certs}/trustedcerts:/trustedcerts
   ds:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ds:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ds:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
     depends_on:
       dsdbmigrate:
         condition: service_completed_successfully
@@ -148,36 +103,81 @@ services:
       - xm__xmpro__xmidentity__server__baseUrl=${SM_BASEURL_SERVER:-https://sm.host/}
       - xm__xmpro__xmidentity__client__id=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - xm__xmpro__xmidentity__client__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
-      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-5aa3b71b-1754-18ec-84a5-94a6ea9e7f5a}
+      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-4d47e2da-d022-d613-3a97-e2ba5df197bb}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
     volumes:
       - ${CERTIFICATES_DIR:-./certs}/certs:/certs
       - ${CERTIFICATES_DIR:-./certs}/trustedcerts:/trustedcerts
   addbmigrate:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/addbmigrate:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/addbmigrate:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
     depends_on:
       addb:
         condition: service_completed_successfully
     environment:
       - ADDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AD;User=${ADDB_USER:-someAdDbUser};Password=${ADDB_PASSWORD:-someAdDbPassword!}
       - DS_BASEURL_CLIENT=${DS_BASEURL_CLIENT:-https://localhost:5203/}
-  licenses:
-    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/licenses:${REGISTRY_VERSION:-4.5.0.129-alpha-954b59307e}
+  dsdbmigrate:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdbmigrate:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
     depends_on:
-      smdbmigrate:
+      dsdb:
         condition: service_completed_successfully
+    environment:
+      - DSDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
+      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-e6000e52-9193-457b-8eb8-f6781f61faa4}
+      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-KDsymOMHuXi8XaP6Cqnw3n5TEA1t7nvX}
+      - DSDB_COLLECTION_NAME=${DSDB_COLLECTION_NAME:-COLLECTION 4.5.0-alpha}
+  addb:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/addb:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
     environment:
       - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
       - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
       - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
       - SQLCMDUSER=${DB_SA_USER:-sa}
       - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
-      - SQLCMDDBNAME=master
+    
+      - ADDB_USER=${ADDB_USER:-someAdDbUser}
+      - ADDB_PASSWORD=${ADDB_PASSWORD:-someAdDbPassword!}
+  sh:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/stream-host:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
+    depends_on:
+      ds:
+        condition: service_healthy
+      dsdb:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      - xm__consolelogging__minimumlevel__default=${SH_LOG_LEVEL:-Information}
+      - xm__xmpro__gateway__id=${SH_ID:-811aa1f8-b282-9013-811c-6cd59465d3a7}
+      - xm__xmpro__gateway__name=${SH_NAME:-vsts-container}
+      - xm__xmpro__gateway__serverurl=${DS_BASEURL_SERVER:-https://ds:8443/}
+      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-e6000e52-9193-457b-8eb8-f6781f61faa4}
+      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-KDsymOMHuXi8XaP6Cqnw3n5TEA1t7nvX}
+      - xm__xmpro__gateway__featureFlags__enableApplicationInsightsTelemetry=false
+      - xm__xmpro__gateway__featureflags__enablelegacycore=false
+      - xm__xmpro__gateway__featureflags__enablelegacycrypto=false
+      - xm__xmpro__XMCryptography__TripleDES__Key=
+    volumes:
+      - ${CERTIFICATES_DIR:-./certs}/certs:/certs
+      - ${CERTIFICATES_DIR:-./certs}/trustedcerts:/trustedcerts
+  smdb:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/smdb:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
+    environment:
+      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
+      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
+      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
+      - SQLCMDUSER=${DB_SA_USER:-sa}
+      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
     
       - SMDB_USER=${SMDB_USER:-someSmDbUser}
       - SMDB_PASSWORD=${SMDB_PASSWORD:-someSmDbPassword!}
-      - COMPANY_ADMIN_EMAILADDRESS=${COMPANY_ADMIN_EMAILADDRESS:-evaluation@xmpro.com}
-      - COMPANY_ID=${COMPANY_ID:-2}
-      - LICENSE_API_URL=${LICENSE_API_URL:-https://fa-xmrlicense-nonprod.azurewebsites.net/api/license}
-      - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
-      - AD_PRODUCT_ID=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
+  dsdb:
+    image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdb:${REGISTRY_VERSION:-4.5.0.130-alpha-78320c8af9}
+    environment:
+      - SQLCMDSERVER=${DB_PROTOCOL:-tcp}:${DB_SERVER:-host.docker.internal}
+      - SQLCMDENCRYPT=${DB_ENCRYPT:-true}
+      - SQLCMDTRUSTSERVERCERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE:-true}
+      - SQLCMDUSER=${DB_SA_USER:-sa}
+      - SQLCMDPASSWORD=${DB_SA_PASSWORD:-someSaPassword!}
+    
+      - DSDB_USER=${DSDB_USER:-someDsDbUser}
+      - DSDB_PASSWORD=${DSDB_PASSWORD:-someDsDbPassword!}
