@@ -13,7 +13,7 @@
 
 param (
     [Parameter(Mandatory=$false)]
-    [switch]$GenerateConfigFiles,
+    [switch]$SkipConfigFiles,
 
     [Parameter(Mandatory=$false)]
     [string]$DockerComposeDir = "$env:USERPROFILE\.xmpro-post-install\docker-compose",
@@ -47,7 +47,7 @@ param (
     [string]$RegistryVersion = "4.5.0-alpha",
 
     [Parameter(Mandatory=$false)]
-    [switch]$UseScriptBasedCA = $true,
+    [switch]$SkipScriptBasedCA,
 
     [Parameter(Mandatory=$false)]
     [string]$CertificatePassword = "somepassword",
@@ -78,7 +78,24 @@ param (
     [switch]$SkipHealthChecks,
 
     [Parameter(Mandatory=$false)]
-    [switch]$DebugMode
+    [switch]$SkipPrerequisites,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipDockerComposeDownload,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipCAScriptsDownload,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipPSCertificates = $true,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$DebugMode,
+    
+    # Installation mode - determines which components to deploy
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("All", "SMOnly")]
+    [string]$InstallMode = "All"
 )
 
 # Initialize persistent directory and log file path before Write-Log function
@@ -874,38 +891,39 @@ function Set-SMInstallEnvironmentVariables {
     $sslCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\ssl.pfx"
 
     # Set environment variables for SM Install.ps1
-    $env:PRODUCT_ID = $global:ProductId
+    # NVL-style environment variable setting (use existing env vars or fall back to defaults)
+    $env:PRODUCT_ID = if ($env:PRODUCT_ID) { $env:PRODUCT_ID } else { $global:ProductId }
     Write-Log "Setting PRODUCT_ID environment variable to: $($env:PRODUCT_ID)" -ForegroundColor Cyan
-    $env:BASE_URL = "https://$global:Hostname.local/"
-    $env:INTERNAL_BASE_URL = ""
-    $env:SITE_PATH = $SmWebsitePath
-    $env:SITE_NAME = $SmWebsiteName
-    $env:APP_POOL_NAME = $SmAppPoolName
+    $env:BASE_URL = if ($env:BASE_URL) { $env:BASE_URL } else { "https://$global:Hostname.local/" }
+    $env:INTERNAL_BASE_URL = if ($env:INTERNAL_BASE_URL) { $env:INTERNAL_BASE_URL } else { "" }
+    $env:SITE_PATH = if ($env:SITE_PATH) { $env:SITE_PATH } else { $SmWebsitePath }
+    $env:SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { $SmWebsiteName }
+    $env:APP_POOL_NAME = if ($env:APP_POOL_NAME) { $env:APP_POOL_NAME } else { $SmAppPoolName }
 
     # SSL Certificate (required)
-    $env:SSL_CERT_PATH = $sslCertPath
-    $env:SSL_CERT_PASSWORD = $CertificatePassword
+    $env:SSL_CERT_PATH = if ($env:SSL_CERT_PATH) { $env:SSL_CERT_PATH } else { $sslCertPath }
+    $env:SSL_CERT_PASSWORD = if ($env:SSL_CERT_PASSWORD) { $env:SSL_CERT_PASSWORD } else { $CertificatePassword }
 
     # Token Certificate (required)
-    $env:TOKEN_CERT_PATH = $tokenCertPath
-    $env:TOKEN_CERT_PASSWORD = $CertificatePassword
-    $env:TOKEN_CERT_SUBJECT = "CN=sm"
-    $env:TOKEN_CERT_LOCATION = "LocalMachine"
+    $env:TOKEN_CERT_PATH = if ($env:TOKEN_CERT_PATH) { $env:TOKEN_CERT_PATH } else { $tokenCertPath }
+    $env:TOKEN_CERT_PASSWORD = if ($env:TOKEN_CERT_PASSWORD) { $env:TOKEN_CERT_PASSWORD } else { $CertificatePassword }
+    $env:TOKEN_CERT_SUBJECT = if ($env:TOKEN_CERT_SUBJECT) { $env:TOKEN_CERT_SUBJECT } else { "CN=sm" }
+    $env:TOKEN_CERT_LOCATION = if ($env:TOKEN_CERT_LOCATION) { $env:TOKEN_CERT_LOCATION } else { "LocalMachine" }
 
     # Database settings
-    $env:DB_CONNECTION_STRING = "Server=$SqlServerName;Database=$SqlDatabaseName;User Id=$global:SmDbUser;Password=$global:SmDbPassword;Encrypt=false;TrustServerCertificate=true;"
-    $env:ENABLE_DB_MIGRATIONS = "false"
-    $env:INCLUDE_AI_DB_MIGRATIONS = "false"
+    $env:DB_CONNECTION_STRING = if ($env:DB_CONNECTION_STRING) { $env:DB_CONNECTION_STRING } else { "Server=$SqlServerName;Database=$SqlDatabaseName;User Id=$global:SmDbUser;Password=$global:SmDbPassword;Encrypt=false;TrustServerCertificate=true;" }
+    $env:ENABLE_DB_MIGRATIONS = if ($env:ENABLE_DB_MIGRATIONS) { $env:ENABLE_DB_MIGRATIONS } else { "false" }
+    $env:INCLUDE_AI_DB_MIGRATIONS = if ($env:INCLUDE_AI_DB_MIGRATIONS) { $env:INCLUDE_AI_DB_MIGRATIONS } else { "false" }
 
     # Security settings
-    $env:AES_SALT = [System.Web.Security.Membership]::GeneratePassword(32, 8)
+    $env:AES_SALT = if ($env:AES_SALT) { $env:AES_SALT } else { [System.Web.Security.Membership]::GeneratePassword(32, 8) }
 
     # Email settings (disable for now)
-    $env:ENABLE_EMAIL = "false"
+    $env:ENABLE_EMAIL = if ($env:ENABLE_EMAIL) { $env:ENABLE_EMAIL } else { "false" }
 
     # Logging
-    $env:LOG_LEVEL = "Verbose"
-    $env:ENABLE_LOG_FILE_OUTPUT = "true"
+    $env:LOG_LEVEL = if ($env:LOG_LEVEL) { $env:LOG_LEVEL } else { "Verbose" }
+    $env:ENABLE_LOG_FILE_OUTPUT = if ($env:ENABLE_LOG_FILE_OUTPUT) { $env:ENABLE_LOG_FILE_OUTPUT } else { "true" }
 
     Write-Log "SM Install.ps1 environment variables set" -ForegroundColor Green
 }
@@ -1272,6 +1290,97 @@ function Test-XMProCertificatesExist {
     $signCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\sign.pfx"
 
     return (Test-Path $sslCertPath) -and (Test-Path $signCertPath)
+}
+
+function Generate-PSCertificates {
+    # Ensure certificates directory exists
+    if (-not (Test-Path $global:CertificatesDir)) {
+        Write-Log "Creating certificates directory: $global:CertificatesDir" -ForegroundColor Yellow
+        New-Item -Path $global:CertificatesDir -ItemType Directory -Force | Out-Null
+    }
+    
+    # Ensure certs subdirectory exists
+    $certsSubDir = Join-Path -Path $global:CertificatesDir -ChildPath "certs"
+    if (-not (Test-Path $certsSubDir)) {
+        Write-Log "Creating certs subdirectory: $certsSubDir" -ForegroundColor Yellow
+        New-Item -Path $certsSubDir -ItemType Directory -Force | Out-Null
+    }
+    
+    $signCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\sign.pfx"
+    
+    # Only create signing certificate if it doesn't already exist
+    if (-not (Test-Path $signCertPath)) {
+        try {
+            Write-Log "Creating signing certificate..." -ForegroundColor Yellow
+            # Create self-signed certificate with 4096-bit RSA key
+            $cert = New-SelfSignedCertificate -Subject "CN=SM" -KeyLength 4096 -KeyAlgorithm RSA -HashAlgorithm SHA256 -KeyExportPolicy Exportable
+
+            # Export to PFX
+            $password = ConvertTo-SecureString -String $CertificatePassword -Force -AsPlainText
+            Export-PfxCertificate -Cert $cert -FilePath $signCertPath -Password $password
+
+            # Clean up - remove from certificate store since you want manual handling
+            Remove-Item -Path "Cert:\LocalMachine\My\$($cert.Thumbprint)"
+            Write-Log "Signing certificate created at: $signCertPath" -ForegroundColor Green
+        }
+        catch {
+            Write-Log "ERROR: Failed to create signing certificate" -ForegroundColor Red
+            Write-Log "Error Type: $($_.Exception.GetType().FullName)" -ForegroundColor Red
+            Write-Log "Error Message: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Log "Error Details: $($_.ErrorDetails.Message)" -ForegroundColor Red
+            Write-Log "Stack Trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+            Write-Log "Certificate Path: $signCertPath" -ForegroundColor Red
+            Write-Log "Certificate Password Length: $($CertificatePassword.Length)" -ForegroundColor Red
+            throw "Signing certificate creation failed: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Log "Signing certificate already exists at: $signCertPath - will not recreate" -ForegroundColor Green
+    }
+
+    $sslCertPath = Join-Path -Path $global:CertificatesDir -ChildPath "certs\ssl.pfx"
+    
+    # Only create SSL certificate if it doesn't already exist
+    if (-not (Test-Path $sslCertPath)) {
+        Write-Log "Creating SSL certificate..." -ForegroundColor Yellow
+        # Create SSL certificate with proper extensions
+        $cert = New-SelfSignedCertificate `
+            -Subject "CN=$global:Hostname.local" `
+            -DnsName @("$global:Hostname.local", "127.0.0.1", "localhost") `
+            -KeyLength 4096 `
+            -KeyAlgorithm RSA `
+            -HashAlgorithm SHA256 `
+            -KeyExportPolicy Exportable `
+            -KeyUsage DigitalSignature, KeyEncipherment `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.1,1.3.6.1.5.5.7.3.2") `
+            -NotAfter (Get-Date).AddYears(1)
+
+        # Export to PFX
+        $password = ConvertTo-SecureString -String $CertificatePassword -Force -AsPlainText
+        Export-PfxCertificate -Cert $cert -FilePath $sslCertPath -Password $password
+
+        # Clean up
+        Remove-Item -Path "Cert:\LocalMachine\My\$($cert.Thumbprint)"
+        Write-Log "SSL certificate created at: $sslCertPath" -ForegroundColor Green
+
+    } else {
+        Write-Log "SSL certificate already exists at: $sslCertPath - will not recreate" -ForegroundColor Green
+    }
+
+    $password = ConvertTo-SecureString -String $CertificatePassword -Force -AsPlainText
+    
+    # Check if certificate is already imported to avoid duplicates
+    $tempCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($sslCertPath, $CertificatePassword)
+    $existingCert = Get-ChildItem -Path "Cert:\LocalMachine\Root" | Where-Object { $_.Thumbprint -eq $tempCert.Thumbprint }
+    
+    if ($existingCert) {
+        Write-Log "SSL certificate already imported to Trusted Root store (Thumbprint: $($tempCert.Thumbprint))" -ForegroundColor Green
+    } else {
+        Write-Log "Importing SSL certificate to Trusted Root store..." -ForegroundColor Yellow
+        # Import PFX to Trusted Root store to make it trusted
+        Import-PfxCertificate -FilePath $sslCertPath -Password $password -CertStoreLocation Cert:\LocalMachine\Root
+        Write-Log "SSL certificate imported to Trusted Root store (Thumbprint: $($tempCert.Thumbprint))" -ForegroundColor Green
+    }
+
 }
 
 # Function to generate certificates for XMPro components using local scripts
@@ -1808,28 +1917,47 @@ function Run-DockerCompose {
 
 # Main execution flow
 Write-Log "Starting XMPro Post-Installation..." -ForegroundColor Cyan
+Write-Log "Installation Mode: $InstallMode" -ForegroundColor Yellow
+
+# Set deployment flags based on InstallMode
+if ($InstallMode -eq "SMOnly") {
+    Write-Log "SM Only mode: Setting skip flags for SM-only deployment" -ForegroundColor Yellow
+    $SkipPrerequisites = $true
+    $SkipDockerCompose = $true
+    $SkipDockerComposeDownload = $true
+    $SkipCAScriptsDownload = $true
+    $SkipHealthChecks = $true
+    $SkipConfigFiles = $true
+    $SkipScriptBasedCA = $true
+    $SkipPSCertificates = $false
+}
 
 # Check prerequisites
-Check-Prerequisites
+if (-not $SkipPrerequisites) {
+    Check-Prerequisites
+}
 
 # Create environment file
-Create-EnvironmentFile
 
-# Generate Config Files if requested
-if ($GenerateConfigFiles) {
+# Generate Config Files unless skipped
+if (-not $SkipConfigFiles) {
     Write-Log "Generating config files..." -ForegroundColor Cyan
-    # Add code to generate config files
+    Create-EnvironmentFile
     Write-Log "Config files generated successfully." -ForegroundColor Green
 }
 
 # Download Docker Compose file
-Download-DockerComposeFile
+if (-not $SkipDockerComposeDownload) {
+    Download-DockerComposeFile
+}
 
 # Download CA scripts
-Download-CAScripts
+if (-not $SkipCAScriptsDownload) {
+    Download-CAScripts
+}
 
-# Generate certificates if using script-based CA
-if ($UseScriptBasedCA) {
+# Generate certificates unless script-based CA is skipped
+if (-not $SkipScriptBasedCA) {
     Write-Log "Using script-based CA creation..." -ForegroundColor Cyan
     Create-PrivateCAFromScript
 
@@ -1839,6 +1967,11 @@ if ($UseScriptBasedCA) {
     }
 
     Generate-XMProCertificatesFromScript
+}
+
+# Generate PowerShell certificates unless skipped
+if (-not $SkipPSCertificates) {
+    Generate-PSCertificates
 }
 
 # Run Docker Compose if not skipped

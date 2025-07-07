@@ -46,7 +46,12 @@ param (
     [switch]$SkipApplicationDeployment,
     
     [Parameter(Mandatory=$false)]
-    [string]$ApplicationScriptUrl = ""
+    [string]$ApplicationScriptUrl = "",
+    
+    # Installation mode - determines which components to install
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("All", "SMOnly")]
+    [string]$InstallMode = "All"
 )
 
 # Try to get the script URL from environment variable or detect from command line
@@ -120,6 +125,18 @@ $global:RebootRequired = $false
 $global:BootstrapTask = "XMPRODockerBootstrap"
 $global:DockerServiceName = "docker"
 $global:PersistentDir = "$env:USERPROFILE\.xmpro-install"
+
+# Handle user profile change when running as SYSTEM after restart (SM Only mode)
+if ($InstallMode -eq "SMOnly") {
+    $currentWorkingDir = Get-Location | Select-Object -ExpandProperty Path
+    if (-not $currentWorkingDir.StartsWith($env:USERPROFILE, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "Detected user profile change (likely running as SYSTEM). Using current working directory as persistent dir." -ForegroundColor Yellow
+        Write-Host "Original USERPROFILE: $env:USERPROFILE" -ForegroundColor Gray
+        Write-Host "Current working directory: $currentWorkingDir" -ForegroundColor Gray
+        $global:PersistentDir = $currentWorkingDir
+    }
+}
+
 $global:LogFile = "$global:PersistentDir\XMPRO-Docker-Install.log"
 $global:RestartMarkerFile = "$global:PersistentDir\XMPRO-Docker-RestartMarker.json"
 $global:TempScriptPath = "$global:PersistentDir\Install-XMPRO-DockerCE-Flowchart.ps1"
@@ -200,12 +217,17 @@ function Register-ScriptForAfterRestart {
         
         # Now use the persistent script path for the scheduled task
         $taskName = $global:BootstrapTask
-        $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-ExecutionPolicy Bypass -File `"$persistentScriptPath`" $Arguments"
-        $trigger = New-ScheduledTaskTrigger -AtLogon
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-        $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-        $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Highest
-        
+        if ($InstallMode -ne "SMOnly") {
+            $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-ExecutionPolicy Bypass -File `"$persistentScriptPath`" $Arguments"
+            $trigger = New-ScheduledTaskTrigger -AtLogon
+            $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Highest
+        } else {
+            $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-ExecutionPolicy Bypass -File `"$persistentScriptPath`" $Arguments" -WorkingDirectory $global:PersistentDir
+            $trigger = New-ScheduledTaskTrigger -AtStartup  # Changed from AtLogon to AtStartup for system tasks
+            $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        }
         # Remove the task if it already exists
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
         
@@ -562,7 +584,7 @@ function Handle-Restart {
     
     # Set up the script to run after restart
     $scriptPath = $MyInvocation.MyCommand.Path
-    $arguments = "-InstallPhase $NextPhase -ContinueAfterRestart"
+    $arguments = "-InstallPhase $NextPhase -ContinueAfterRestart -InstallMode `"$InstallMode`""
     if ($Force) { $arguments += " -Force" }
     if ($DockerVersion -ne "latest") { $arguments += " -DockerVersion `"$DockerVersion`"" }
     if ($UbuntuAppxUrl -ne "https://aka.ms/wslubuntu2204") { $arguments += " -UbuntuAppxUrl `"$UbuntuAppxUrl`"" }
@@ -625,7 +647,12 @@ function Handle-Restart {
         Write-Log $Message -ForegroundColor Yellow
         Write-Log "The script will continue automatically after restart." -ForegroundColor Yellow
         
-        Read-Host "Press Enter to restart your computer"
+        # Skip user prompt for SM Only mode
+        if ($InstallMode -ne "SMOnly") {
+            Read-Host "Press Enter to restart your computer"
+        } else {
+            Write-Log "SM Only mode: Restarting automatically without user prompt..." -ForegroundColor Yellow
+        }
         Write-Log "Restarting computer..." -ForegroundColor Cyan
         if ($Force) {
             Restart-Computer -Force
@@ -796,6 +823,19 @@ if ($InstallPhase -eq 1) {
         Remove-Item -Path $dotnetInstaller -Force
         $global:RebootRequired = $true
     }
+    
+    # P13: Install Mode Decision Point
+    if ($InstallMode -eq "SMOnly") {
+        Write-Log "SM Only mode: Skipping WSL2, Container Service, and SQL Server installation" -ForegroundColor Yellow
+        Write-Log "Phase 1 complete for SM Only installation." -ForegroundColor Green
+        
+        # Force restart to go directly to Phase 4 (SM deployment)
+        $global:RebootRequired = $true
+        Handle-Restart -NextPhase 4 -Message "Phase 1 complete for SM Only installation. Restarting to proceed with SM deployment."
+        return
+    }
+    
+    Write-Log "All mode: Continuing with WSL2, Container Service, and SQL Server installation..." -ForegroundColor Yellow
     
     # Enable WSL and Virtual Machine Platform
     Write-Log "Enabling WSL and Virtual Machine Platform..." -ForegroundColor Yellow
@@ -1474,64 +1514,82 @@ if ($InstallPhase -eq 3) {
 if ($global:CurrentPhase -eq 4 -or (-not $global:CurrentPhase -and -not $SkipApplicationDeployment)) {
     Write-Log "Phase 4: Service Verification and Application Deployment" -ForegroundColor Cyan
     
-    # Re-verify all services are working properly after potential restart
-    Write-Log "Re-verifying system services before application deployment..." -ForegroundColor Cyan
+    # Re-verify all services are working properly after potential restart (skip for SM Only)
+    if ($InstallMode -ne "SMOnly") {
+        Write-Log "Re-verifying system services before application deployment..." -ForegroundColor Cyan
+        
+        # Optimize WSL networking before restart - Force disable vEthernet (nat) for migrate containers
+        Write-Log "Optimizing WSL networking interfaces..." -ForegroundColor Cyan
+        try {
+            # Check if vEthernet (nat) interface exists and disable it
+            $natInterface = Get-NetAdapter -Name "vEthernet (nat)" -ErrorAction SilentlyContinue
+            if ($natInterface) {
+                Write-Log "Found vEthernet (nat) interface - disabling to ensure migrate containers work properly..." -ForegroundColor Yellow
+                try {
+                    Disable-NetAdapter -Name "vEthernet (nat)" -Confirm:$false
+                    Write-Log "Successfully disabled vEthernet (nat) interface" -ForegroundColor Green
+                    Start-Sleep -Seconds 2
+                }
+                catch {
+                    Write-Log "Warning: Could not disable vEthernet (nat): $_" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Log "vEthernet (nat) interface not found - no action needed" -ForegroundColor Green
+            }
+        }
+        catch {
+            Write-Log "Warning: Could not optimize WSL networking: $_" -ForegroundColor Yellow
+        }
+        
+        # Restart WSL to ensure clean state
+        Write-Log "Restarting WSL to ensure clean state..." -ForegroundColor Yellow
+        try {
+            wsl --shutdown
+            wsl --exec dbus-launch true
+            Start-Sleep -Seconds 5
+            wsl echo "WSL restarted successfully"
+            Write-Log "WSL restarted successfully" -ForegroundColor Green
+        }
+        catch {
+            Write-Log "Warning: Could not restart WSL: $_" -ForegroundColor Yellow
+        }
+        
+        # Verify Docker services
+        Write-Log "Verifying Docker services..." -ForegroundColor Cyan
+        try {
+            $dockerVersion = docker --version
+            Write-Log "Docker is accessible: $dockerVersion" -ForegroundColor Green
+        }
+        catch {
+            Write-Log "Warning: Docker may not be properly initialized: $_" -ForegroundColor Yellow
+            Write-Log "Attempting to start Docker..." -ForegroundColor Yellow
+            Start-Service Docker -ErrorAction SilentlyContinue
+        }
+        
+        # Verify SQL Server service
+        Write-Log "Verifying SQL Server service..." -ForegroundColor Cyan
+        $sqlService = Get-Service -Name "MSSQL*" -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "Running" }
+        if ($sqlService) {
+            Write-Log "SQL Server service is running: $($sqlService.Name)" -ForegroundColor Green
+        } else {
+            Write-Log "Warning: SQL Server service may not be running" -ForegroundColor Yellow
+        }
     
-    # Optimize WSL networking before restart - Force disable vEthernet (nat) for migrate containers
-    Write-Log "Optimizing WSL networking interfaces..." -ForegroundColor Cyan
-    try {
-        # Check if vEthernet (nat) interface exists and disable it
-        $natInterface = Get-NetAdapter -Name "vEthernet (nat)" -ErrorAction SilentlyContinue
-        if ($natInterface) {
-            Write-Log "Found vEthernet (nat) interface - disabling to ensure migrate containers work properly..." -ForegroundColor Yellow
+    }  else {
+        # SM Only mode: Run p4-hook.ps1 if it exists
+        $p4HookPath = "C:\XMPro\p4-hook.ps1"
+        if (Test-Path $p4HookPath) {
+            Write-Log "Running p4-hook.ps1 for SM Only mode..." -ForegroundColor Cyan
             try {
-                Disable-NetAdapter -Name "vEthernet (nat)" -Confirm:$false
-                Write-Log "Successfully disabled vEthernet (nat) interface" -ForegroundColor Green
-                Start-Sleep -Seconds 2
+                & $p4HookPath
+                Write-Log "p4-hook.ps1 executed successfully" -ForegroundColor Green
             }
             catch {
-                Write-Log "Warning: Could not disable vEthernet (nat): $_" -ForegroundColor Yellow
+                Write-Log "Warning: Error executing p4-hook.ps1: $_" -ForegroundColor Yellow
             }
         } else {
-            Write-Log "vEthernet (nat) interface not found - no action needed" -ForegroundColor Green
+            Write-Log "p4-hook.ps1 not found at $p4HookPath - skipping" -ForegroundColor Gray
         }
-    }
-    catch {
-        Write-Log "Warning: Could not optimize WSL networking: $_" -ForegroundColor Yellow
-    }
-    
-    # Restart WSL to ensure clean state
-    Write-Log "Restarting WSL to ensure clean state..." -ForegroundColor Yellow
-    try {
-        wsl --shutdown
-        wsl --exec dbus-launch true
-        Start-Sleep -Seconds 5
-        wsl echo "WSL restarted successfully"
-        Write-Log "WSL restarted successfully" -ForegroundColor Green
-    }
-    catch {
-        Write-Log "Warning: Could not restart WSL: $_" -ForegroundColor Yellow
-    }
-    
-    # Verify Docker services
-    Write-Log "Verifying Docker services..." -ForegroundColor Cyan
-    try {
-        $dockerVersion = docker --version
-        Write-Log "Docker is accessible: $dockerVersion" -ForegroundColor Green
-    }
-    catch {
-        Write-Log "Warning: Docker may not be properly initialized: $_" -ForegroundColor Yellow
-        Write-Log "Attempting to start Docker..." -ForegroundColor Yellow
-        Start-Service Docker -ErrorAction SilentlyContinue
-    }
-    
-    # Verify SQL Server service
-    Write-Log "Verifying SQL Server service..." -ForegroundColor Cyan
-    $sqlService = Get-Service -Name "MSSQL*" -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "Running" }
-    if ($sqlService) {
-        Write-Log "SQL Server service is running: $($sqlService.Name)" -ForegroundColor Green
-    } else {
-        Write-Log "Warning: SQL Server service may not be running" -ForegroundColor Yellow
     }
     
     Write-Log "Service verification complete. Proceeding to application deployment..." -ForegroundColor Green
@@ -1623,6 +1681,7 @@ if ($global:CurrentPhase -eq 4 -or (-not $global:CurrentPhase -and -not $SkipApp
                     $appParams = @{
                         SkipEmailConfiguration = $false
                         DebugMode = $true
+                        InstallMode = $InstallMode
                     }
                     
                     if (-not [string]::IsNullOrEmpty($AppBaseUrl)) {
@@ -1676,8 +1735,10 @@ if ($global:CurrentPhase -eq 4 -or (-not $global:CurrentPhase -and -not $SkipApp
         Write-Log "Application deployment skipped. Run install-xmpro-application.ps1 manually to complete setup." -ForegroundColor Yellow
     }
     
-    # Configure WSL persistence to prevent 60-second timeout (requires user password)
-    Configure-WSLPersistence
+    # Configure WSL persistence to prevent 60-second timeout (skip for SM Only)
+    if ($InstallMode -ne "SMOnly") {
+        Configure-WSLPersistence
+    }
     
     # Mark Phase 4 as completed to prevent restart loop
     Write-Log "Phase 4 completed successfully!" -ForegroundColor Green
