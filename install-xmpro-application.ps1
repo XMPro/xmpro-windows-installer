@@ -898,6 +898,7 @@ function Set-SMInstallEnvironmentVariables {
     $env:INTERNAL_BASE_URL = if ($env:INTERNAL_BASE_URL) { $env:INTERNAL_BASE_URL } else { "" }
     $env:SITE_PATH = if ($env:SITE_PATH) { $env:SITE_PATH } else { $SmWebsitePath }
     $env:SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { $SmWebsiteName }
+    $env:SITE_PORT = '443'
     $env:APP_POOL_NAME = if ($env:APP_POOL_NAME) { $env:APP_POOL_NAME } else { $SmAppPoolName }
 
     # SSL Certificate (required)
@@ -1621,6 +1622,7 @@ function Install-XMProSM {
         Write-Log "  PRODUCT_ID: $($env:PRODUCT_ID)" -ForegroundColor Magenta
         Write-Log "  BASE_URL: $($env:BASE_URL)" -ForegroundColor Magenta
         Write-Log "  SITE_NAME: $($env:SITE_NAME)" -ForegroundColor Magenta
+        Write-Log "  SITE_PORT: $($env:SITE_PORT)" -ForegroundColor Magenta
 
         & $installScriptPath -Uninstall *>&1 | Tee-Object -Variable smOutput | Write-Host
         if ($installParams.Count -gt 0) {
