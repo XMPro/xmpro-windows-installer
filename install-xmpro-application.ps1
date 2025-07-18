@@ -851,7 +851,21 @@ function Create-EnvironmentFile {
     "REGISTRY_VERSION=$RegistryVersion" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
 
     # Add certificate configuration
-    "ASPNETCORE_Kestrel__Certificates__Default__Password=$CertificatePassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "AD_SSL_CERT=/certs/ad.pfx" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "AD_SSL_CERT_PASSWORD=$CertificatePassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "AD_SSL_CERT_TRUST=" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "AI_SSL_CERT=/certs/ai.pfx" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "AI_SSL_CERT_PASSWORD=$CertificatePassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "AI_SSL_CERT_TRUST=" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DS_SSL_CERT=/certs/ds.pfx" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DS_SSL_CERT_PASSWORD=$CertificatePassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DS_SSL_CERT_TRUST=" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_SSL_CERT=/certs/ssl.pfx" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_SSL_CERT_PASSWORD=$CertificatePassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_SSL_CERT_TRUST=" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_TOKEN_CERT=/certs/sign.pfx" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_TOKEN_CERT_PASSWORD=$CertificatePassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_TOKEN_CERT_SUBJECT=CN=sm" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
 
     # Add product IDs and keys
     "AD_PRODUCT_ID=fe011f90-5bb6-80ad-b0a2-56300bf3b65d" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
