@@ -788,7 +788,10 @@ function Create-EnvironmentFile {
     # Create .env file with SQL_HOST
     "SQL_HOST=$global:Hostname.local" | Out-File -FilePath $global:EnvFile -Encoding ASCII
     # Create .env file with SQL_HOST
-    "DB_SERVER=$global:Hostname.local" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DB_SERVER_INCONTAINERS=$global:Hostname.local" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DB_PORT_INCONTAINERS=1433" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DB_SERVER_CONTAINERHOST=localhost" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DB_PORT_CONTAINERHOST=1433" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
 
     # Add Windows IP for extra_hosts configuration
 
@@ -809,9 +812,10 @@ function Create-EnvironmentFile {
     "CONFIG_DIR=$wslConfigDir" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
 
     # Add database credentials
-    "SQLCMDUSER=$global:SqlUsername" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
-    "DB_SA_PASSWORD=$sqlSaPassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
-    "SQLCMDDBNAME=master" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DB_SA_USER=$global:SqlUsername" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "DB_SA_PASSWORD=$global:SqlSaPassword" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    #"SQLCMDUSER=$global:SqlUsername" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    #"SQLCMDDBNAME=master" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
 
     # Add database user credentials
     "SMDB_USER=$global:SmDbUser" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
@@ -840,11 +844,13 @@ function Create-EnvironmentFile {
     "SM_HOST=$global:Hostname.local" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
 
     # Add service URLs
-    "AD_BASEURL_CLIENT=https://localhost:5202/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
-    "DS_BASEURL_CLIENT=https://localhost:5203/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    #"AD_BASEURL_CLIENT=https://localhost:5202/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    #"DS_BASEURL_CLIENT=https://localhost:5203/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_PORT=443" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    "SM_BASEURL_CLIENT=https://localhost/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
     "SM_BASEURL_SERVER=https://$global:Hostname.local/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
-    "AD_BASEURL_SERVER=https://ad:8443/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
-    "DS_BASEURL_SERVER=https://ds:8443/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    #"AD_BASEURL_SERVER=https://ad:8443/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
+    #"DS_BASEURL_SERVER=https://ds:8443/" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
 
     # Add registry information
     "REGISTRY_URL=$RegistryUrl" | Out-File -FilePath $global:EnvFile -Append -Encoding ASCII
@@ -908,8 +914,8 @@ function Set-SMInstallEnvironmentVariables {
     # NVL-style environment variable setting (use existing env vars or fall back to defaults)
     $env:PRODUCT_ID = if ($env:PRODUCT_ID) { $env:PRODUCT_ID } else { $global:ProductId }
     Write-Log "Setting PRODUCT_ID environment variable to: $($env:PRODUCT_ID)" -ForegroundColor Cyan
-    $env:BASE_URL = if ($env:BASE_URL) { $env:BASE_URL } else { "https://$global:Hostname.local/" }
-    $env:INTERNAL_BASE_URL = if ($env:INTERNAL_BASE_URL) { $env:INTERNAL_BASE_URL } else { "" }
+    $env:BASE_URL = if ($env:BASE_URL) { $env:BASE_URL } else { "https://localhost" }
+    $env:INTERNAL_BASE_URL = if ($env:INTERNAL_BASE_URL) { $env:INTERNAL_BASE_URL } else { "https://$global:Hostname.local" }
     $env:SITE_PATH = if ($env:SITE_PATH) { $env:SITE_PATH } else { $SmWebsitePath }
     $env:SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { $SmWebsiteName }
     $env:SITE_PORT = '443'
@@ -1635,6 +1641,7 @@ function Install-XMProSM {
         Write-Log "Environment variables before calling SM Install.ps1:" -ForegroundColor Magenta
         Write-Log "  PRODUCT_ID: $($env:PRODUCT_ID)" -ForegroundColor Magenta
         Write-Log "  BASE_URL: $($env:BASE_URL)" -ForegroundColor Magenta
+        Write-Log "  INTERNAL_BASE_URL: $($env:INTERNAL_BASE_URL)" -ForegroundColor Magenta
         Write-Log "  SITE_NAME: $($env:SITE_NAME)" -ForegroundColor Magenta
         Write-Log "  SITE_PORT: $($env:SITE_PORT)" -ForegroundColor Magenta
 
