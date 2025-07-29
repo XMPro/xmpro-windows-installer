@@ -25,11 +25,11 @@ services:
     environment:
       - DS_SSL_CERT_TRUST=${DS_SSL_CERT_TRUST:-}
       - xm__consolelogging__minimumlevel__default=${SH_LOG_LEVEL:-Information}
-      - xm__xmpro__gateway__id=${SH_ID:-83ff0028-4b23-8906-347b-b220a8b05b33}
+      - xm__xmpro__gateway__id=${SH_ID:-60f33d7a-efeb-c3a3-ae35-1b71435c1de6}
       - xm__xmpro__gateway__name=${SH_NAME:-vsts-container}
       - xm__xmpro__gateway__serverurl=${DS_BASEURL_SERVER:-https://ds:8443/}
-      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-21b1b523-75a9-4b4b-bdf3-35046739e145}
-      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-mxiHTOoZCXw3FVUi1DmPDvF7fzU3chss}
+      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-4f822996-6cf1-412d-8229-218ee93ac499}
+      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-ExpIZruYs0Dez0KkzeH0n5kbTVSKLZQr}
       - xm__xmpro__gateway__featureFlags__enableApplicationInsightsTelemetry=false
       - xm__xmpro__gateway__featureflags__enablelegacycore=false
       - xm__xmpro__gateway__featureflags__enablelegacycrypto=false
@@ -66,7 +66,7 @@ services:
       - xm__xmpro__xmidentity__server__internalBaseUrl=${SM_BASEURL_SERVER:-https://host.docker.internal:5200/}
       - xm__xmpro__xmidentity__client__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
       - xm__xmpro__xmidentity__client__id=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
-      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-c84d57e6-99b9-24e9-01d1-4875ecff24b0}
+      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-06d8bb8b-877d-951f-b898-a94d0c292e1a}
       - xm__xmpro__dataStreamDesigner__server__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
       - xm__xmpro__dataStreamDesigner__server__internalBaseUrl=${DS_BASEURL_SERVER:-https://ds:8443/}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
@@ -104,7 +104,7 @@ services:
       - xm__xmpro__xmidentity__server__internalBaseUrl=${SM_BASEURL_SERVER:-https://host.docker.internal:5200/}
       - xm__xmpro__xmidentity__client__baseUrl=${AI_BASEURL_CLIENT:-https://localhost:5204/}
       - xm__xmpro__xmidentity__client__id=${AI_PRODUCT_ID:-b7be889b-01d3-4bd2-95c6-511017472ec8}
-      - xm__xmpro__xmidentity__client__sharedkey=${AI_PRODUCT_KEY:-6a1da944-6d0a-79fe-9687-cba726241369}
+      - xm__xmpro__xmidentity__client__sharedkey=${AI_PRODUCT_KEY:-e4a8e97b-e318-77c1-e7c7-0c2ab5202491}
       - xm__xmpro__ai__server__baseUrl=${AI_BASEURL_SERVER:-https://ai:8443/}
       - xm__xmpro__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER_INCONTAINERS:-host.docker.internal},${DB_PORT_INCONTAINERS:-1433};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AI;User=${AIDB_USER:-someAiDbUser};Password=${AIDB_PASSWORD:-someAiDbPassword!}
       - xm__xmpro__xmsettings__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER_INCONTAINERS:-host.docker.internal},${DB_PORT_INCONTAINERS:-1433};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AI;User=${AIDB_USER:-someAiDbUser};Password=${AIDB_PASSWORD:-someAiDbPassword!}
@@ -187,10 +187,10 @@ services:
       - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - SM_PRODUCT_ID=${SM_PRODUCT_ID:-380129dd-6ac3-47fc-a399-234394977680}
       - XMPRO_NOTEBOOK_PRODUCT_ID=${XMPRO_NOTEBOOK_PRODUCT_ID:-c6de3c46-e8ab-4c71-8787-947e6fd2292c}
-      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-c84d57e6-99b9-24e9-01d1-4875ecff24b0}
-      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-6a1da944-6d0a-79fe-9687-cba726241369}
-      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-e2f4af27-a682-1ba3-7c85-8c2081ecde8b}
-      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-418df060-161f-54fb-4e10-fc858a019f7f}
+      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-06d8bb8b-877d-951f-b898-a94d0c292e1a}
+      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-e4a8e97b-e318-77c1-e7c7-0c2ab5202491}
+      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-cd43e126-778d-961e-3ab5-6502e82c239a}
+      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-aabd9468-1352-48c9-5f36-78b34c2e883c}
       - AI_PRODUCT_ENABLE=${AI_PRODUCT_ENABLE:-true}
   dsdbmigrate:
     image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/dsdbmigrate:${REGISTRY_VERSION:-4.5.1.45-690b164f9e}
@@ -199,8 +199,8 @@ services:
         condition: service_completed_successfully
     environment:
       - DSDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER_INCONTAINERS:-host.docker.internal},${DB_PORT_INCONTAINERS:-1433};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
-      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-21b1b523-75a9-4b4b-bdf3-35046739e145}
-      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-mxiHTOoZCXw3FVUi1DmPDvF7fzU3chss}
+      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-4f822996-6cf1-412d-8229-218ee93ac499}
+      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-ExpIZruYs0Dez0KkzeH0n5kbTVSKLZQr}
       - DSDB_COLLECTION_NAME=${DSDB_COLLECTION_NAME:-COLLECTION 4.5.1}
   ds:
     image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ds:${REGISTRY_VERSION:-4.5.1.45-690b164f9e}
@@ -234,7 +234,7 @@ services:
       - xm__xmpro__xmidentity__server__internalBaseUrl=${SM_BASEURL_SERVER:-https://host.docker.internal:5200/}
       - xm__xmpro__xmidentity__client__id=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - xm__xmpro__xmidentity__client__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
-      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-e2f4af27-a682-1ba3-7c85-8c2081ecde8b}
+      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-cd43e126-778d-961e-3ab5-6502e82c239a}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
       - xm__xmpro__appDesigner__server__internalBaseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
     volumes:
