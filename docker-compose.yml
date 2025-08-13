@@ -22,10 +22,10 @@ services:
       - DS_PRODUCT_ID=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - SM_PRODUCT_ID=${SM_PRODUCT_ID:-380129dd-6ac3-47fc-a399-234394977680}
       - XMPRO_NOTEBOOK_PRODUCT_ID=${XMPRO_NOTEBOOK_PRODUCT_ID:-c6de3c46-e8ab-4c71-8787-947e6fd2292c}
-      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-d0751682-59ec-1eab-9e9d-8b475dfb30f3}
-      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-c22035f6-c5de-45ac-1351-22c5c09b5c31}
-      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-deb5e5e9-f0a5-7af2-fbe2-33fa83b79bf4}
-      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-8ba25a8f-5333-08cb-a064-17b6cbc40307}
+      - AD_PRODUCT_KEY=${AD_PRODUCT_KEY:-a8fa98c1-32d1-41af-8b2a-921108e82bbf}
+      - AI_PRODUCT_KEY=${AI_PRODUCT_KEY:-fb60cd24-093b-3cf8-f230-3f871c7755e6}
+      - DS_PRODUCT_KEY=${DS_PRODUCT_KEY:-68d69a04-91b6-a777-74e4-ae25cd9175a8}
+      - XMPRO_NOTEBOOK_PRODUCT_KEY=${XMPRO_NOTEBOOK_PRODUCT_KEY:-32a52cb3-55ec-b3ab-f789-efc6180dcc01}
       - AI_PRODUCT_ENABLE=${AI_PRODUCT_ENABLE:-true}
   ai:
     image: ${REGISTRY_URL:-xmprononprod.azurecr.io}/ai:${REGISTRY_VERSION:-4.5.2.48-511f1a1411}
@@ -55,7 +55,7 @@ services:
       - xm__xmpro__xmidentity__server__internalBaseUrl=${SM_BASEURL_SERVER:-https://host.docker.internal:5200/}
       - xm__xmpro__xmidentity__client__baseUrl=${AI_BASEURL_CLIENT:-https://localhost:5204/}
       - xm__xmpro__xmidentity__client__id=${AI_PRODUCT_ID:-b7be889b-01d3-4bd2-95c6-511017472ec8}
-      - xm__xmpro__xmidentity__client__sharedkey=${AI_PRODUCT_KEY:-c22035f6-c5de-45ac-1351-22c5c09b5c31}
+      - xm__xmpro__xmidentity__client__sharedkey=${AI_PRODUCT_KEY:-fb60cd24-093b-3cf8-f230-3f871c7755e6}
       - xm__xmpro__ai__server__baseUrl=${AI_BASEURL_SERVER:-https://ai:8443/}
       - xm__xmpro__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER_INCONTAINERS:-host.docker.internal},${DB_PORT_INCONTAINERS:-1433};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AI;User=${AIDB_USER:-someAiDbUser};Password=${AIDB_PASSWORD:-someAiDbPassword!}
       - xm__xmpro__xmsettings__data__connectionString=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER_INCONTAINERS:-host.docker.internal},${DB_PORT_INCONTAINERS:-1433};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=AI;User=${AIDB_USER:-someAiDbUser};Password=${AIDB_PASSWORD:-someAiDbPassword!}
@@ -78,11 +78,11 @@ services:
     environment:
       - DS_SSL_CERT_TRUST=${DS_SSL_CERT_TRUST:-}
       - xm__consolelogging__minimumlevel__default=${SH_LOG_LEVEL:-Information}
-      - xm__xmpro__gateway__id=${SH_ID:-de790d84-76cf-0d4e-6674-4244e83dc2d5}
+      - xm__xmpro__gateway__id=${SH_ID:-3818a912-4ace-80d3-c55e-9fb7b82e26bc}
       - xm__xmpro__gateway__name=${SH_NAME:-vsts-container}
       - xm__xmpro__gateway__serverurl=${DS_BASEURL_SERVER:-https://ds:8443/}
-      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-8ac175d3-b46b-43c3-8099-542d715de641}
-      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-ODltrnvuK0CoDAQ3bSwy1FhljaOY3iKe}
+      - xm__xmpro__gateway__collectionid=${DSDB_COLLECTION_ID:-f1fce59a-2eaa-44e2-b3eb-07123dedbc5d}
+      - xm__xmpro__gateway__secret=${DSDB_COLLECTION_SECRET:-Q2RldayXrnSxlWPoDNjWfWsb9LyyyZ4O}
       - xm__xmpro__gateway__featureFlags__enableApplicationInsightsTelemetry=false
       - xm__xmpro__gateway__featureflags__enablelegacycore=false
       - xm__xmpro__gateway__featureflags__enablelegacycrypto=false
@@ -168,7 +168,7 @@ services:
       - xm__xmpro__xmidentity__server__internalBaseUrl=${SM_BASEURL_SERVER:-https://host.docker.internal:5200/}
       - xm__xmpro__xmidentity__client__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
       - xm__xmpro__xmidentity__client__id=${AD_PRODUCT_ID:-fe011f90-5bb6-80ad-b0a2-56300bf3b65d}
-      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-d0751682-59ec-1eab-9e9d-8b475dfb30f3}
+      - xm__xmpro__xmidentity__client__sharedkey=${AD_PRODUCT_KEY:-a8fa98c1-32d1-41af-8b2a-921108e82bbf}
       - xm__xmpro__dataStreamDesigner__server__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
       - xm__xmpro__dataStreamDesigner__server__internalBaseUrl=${DS_BASEURL_SERVER:-https://ds:8443/}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
@@ -211,7 +211,7 @@ services:
       - xm__xmpro__xmidentity__server__internalBaseUrl=${SM_BASEURL_SERVER:-https://host.docker.internal:5200/}
       - xm__xmpro__xmidentity__client__id=${DS_PRODUCT_ID:-71435803-967a-e9ac-574c-face863f7ec0}
       - xm__xmpro__xmidentity__client__baseUrl=${DS_BASEURL_CLIENT:-https://localhost:5203/}
-      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-deb5e5e9-f0a5-7af2-fbe2-33fa83b79bf4}
+      - xm__xmpro__xmidentity__client__sharedkey=${DS_PRODUCT_KEY:-68d69a04-91b6-a777-74e4-ae25cd9175a8}
       - xm__xmpro__appDesigner__server__baseUrl=${AD_BASEURL_CLIENT:-https://localhost:5202/}
       - xm__xmpro__appDesigner__server__internalBaseUrl=${AD_BASEURL_SERVER:-https://ad:8443/}
     volumes:
@@ -257,6 +257,6 @@ services:
         condition: service_completed_successfully
     environment:
       - DSDB_CONNECTIONSTRING=Server=${DB_PROTOCOL:-tcp}:${DB_SERVER_INCONTAINERS:-host.docker.internal},${DB_PORT_INCONTAINERS:-1433};Encrypt=${DB_ENCRYPT:-true};TrustServerCertificate=${DB_TRUST_SERVER_CERTIFICATE:-true};PersistSecurityInfo=${DB_PERSIST_SECURITY_INFO:-false};Database=DS;User=${DSDB_USER:-someDsDbUser};Password=${DSDB_PASSWORD:-someDsDbPassword!}
-      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-8ac175d3-b46b-43c3-8099-542d715de641}
-      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-ODltrnvuK0CoDAQ3bSwy1FhljaOY3iKe}
+      - DSDB_COLLECTION_ID=${DSDB_COLLECTION_ID:-f1fce59a-2eaa-44e2-b3eb-07123dedbc5d}
+      - DSDB_COLLECTION_SECRET=${DSDB_COLLECTION_SECRET:-Q2RldayXrnSxlWPoDNjWfWsb9LyyyZ4O}
       - DSDB_COLLECTION_NAME=${DSDB_COLLECTION_NAME:-COLLECTION 4.5.2}
